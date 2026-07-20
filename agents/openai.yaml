@@ -1,0 +1,3 @@
+interface:
+  display_name: "FairyGUI UI Pipeline"
+  short_description: "Generate and approve full-screen UI mockups, then build FairyGUI specs, assets, XML drafts, and validation reports."
