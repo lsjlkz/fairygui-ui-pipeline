@@ -1,10 +1,5 @@
 # FairyGUI UI Pipeline Skill 使用方法
 
-## 位置
-
-```text
-D:\ChatGPTShare\skills\fairygui-ui-pipeline
-```
 
 ## 适合做什么
 
