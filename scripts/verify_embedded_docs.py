@@ -117,6 +117,10 @@ def verify(skill_root: Path) -> dict[str, Any]:
         *(skill_root / "agents").glob("*.yaml"),
     ]
     for path in scan_paths:
+        # This verifier necessarily contains the forbidden markers it searches
+        # for, so scanning its own source would always produce a false positive.
+        if path.resolve() == Path(__file__).resolve():
+            continue
         if not path.is_file() or path.name in {"embedded-docs-manifest.json"}:
             continue
         try:
