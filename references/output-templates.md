@@ -29,8 +29,8 @@
 
 ## State Matrix
 
-| Component | States | Trigger | Visual Change | Image Needed | Controller |
-|---|---|---|---|---|---|
+| Component | States | Trigger | Visual Change | Image Needed | Controller | Business Owner | Visual Owner | Dynamic Data Owner | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|
 
 ## Art Direction
 
@@ -184,6 +184,87 @@ Record after explicit confirmation of the exact file:
 }
 ```
 
+## uxui_semantic_spec.md
+
+```md
+# [screen_name] UX/UI Semantic Spec
+
+## Sources
+
+### Requirement Sources
+- specs/ui_spec.md
+
+### UI/UX Design Document Sources
+- specs/visual_design_brief.md
+
+### Approved Design Sources
+- generated/design/screen_design_final.png
+
+## Screen Goal And User Flow
+
+## UI Part Inventory
+
+| Semantic ID | Visible Part | Purpose | Component Type | Requirement IDs |
+|---|---|---|---|---|
+
+## State Ownership
+
+| Component Type | Business Owner | Visual Owner | Dynamic Data Owner | Controller Decision | Requirement IDs |
+|---|---|---|---|---|---|
+
+## Component Reuse
+
+## Interaction Model
+
+## Requirement / Design Mismatch Report
+
+## Blocking Questions
+```
+
+## component_state_map.json
+
+```json
+{
+  "version": "0.1.0",
+  "screen": "screen_name",
+  "requirementSources": ["specs/ui_spec.md"],
+  "designDocumentSources": ["specs/visual_design_brief.md"],
+  "designSources": ["generated/design/screen_design_final.png"],
+  "components": [
+    {
+      "componentType": "EquipmentSlot",
+      "fguiComponent": "equipment_slot",
+      "purpose": "Display and operate one cooking device",
+      "runtimeOwner": "Mixed",
+      "businessStateOwner": "GamePlay",
+      "visualStateOwner": "FGUI",
+      "dynamicDataOwner": "GameUI",
+      "states": ["idle", "cooking", "ready", "overcooked"],
+      "controllers": ["state"],
+      "reusable": true,
+      "requirementIds": ["REQ-EQUIPMENT-STATE"]
+    }
+  ],
+  "visualInstances": [],
+  "stateGroups": [
+    {
+      "componentType": "EquipmentSlot",
+      "stateName": "ready",
+      "trigger": "cook_timer_completed",
+      "visualDifference": "ready food and highlight are visible",
+      "runtimeData": ["foodId", "cookProgress"],
+      "fguiController": "state",
+      "gearType": ["gearDisplay", "gearIcon"],
+      "requirementIds": ["REQ-EQUIPMENT-STATE"]
+    }
+  ],
+  "requirementLinks": [],
+  "reviewStatus": "reviewed",
+  "blockingForLayout": false,
+  "blockingForXml": false
+}
+```
+
 ## layout_spec.json
 
 ```json
@@ -200,11 +281,20 @@ Record after explicit confirmation of the exact file:
   "regions": [],
   "objects": [
     {
-      "name": "bg_main",
-      "nodeType": "image",
-      "assetName": "bg_main",
-      "bbox": [0, 0, 1920, 1080],
-      "sizeSource": "asset_manifest.displaySize"
+      "name": "equipment_slot_left",
+      "semanticId": "equipment.slot",
+      "instanceId": "equipment_slot_left_01",
+      "componentType": "EquipmentSlot",
+      "stateVariant": "idle",
+      "nodeType": "component",
+      "component": "equipment_slot",
+      "region": "work_area",
+      "bbox": [100, 200, 320, 280],
+      "binding": "equipmentSlotLeft",
+      "stateOwner": "FGUI",
+      "runtimeRole": "cook_source",
+      "requirementIds": ["REQ-EQUIPMENT-STATE"],
+      "slicePolicy": "use_component"
     }
   ],
   "slots": [],
@@ -234,6 +324,10 @@ Record after explicit confirmation of the exact file:
 
 ```json
 {
+  "package": {
+    "name": "cooking",
+    "outputPath": "fgui_xml/cooking"
+  },
   "production": {
     "generateFullScreenDesign": true,
     "requiresDesignApproval": true,
@@ -252,7 +346,8 @@ Record after explicit confirmation of the exact file:
   "assets": [
     {
       "name": "bg_main",
-      "file": "generated/sliced/bg_main.png",
+      "file": "fgui_xml/cooking/art/bg_main.png",
+      "packageRelativeFile": "art/bg_main.png",
       "sourcePixelSize": [1920, 1080],
       "displaySize": [1920, 1080],
       "scalePolicy": "pixel_exact",
@@ -331,13 +426,13 @@ Cell list:
 
 ## Controllers
 
-| Component | Controller | Pages | Default | Used By |
-|---|---|---|---|---|
+| Component | Controller | Pages | Default | Used By | Requirement IDs | State Owner |
+|---|---|---|---|---|---|---|
 
 ## Gear Mapping Table
 
-| Component | Controller | Page | Gear Target | Gear Type | Result |
-|---|---|---|---|---|---|
+| Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
+|---|---|---|---|---|---|---|
 
 ## Transitions
 
@@ -346,12 +441,56 @@ Cell list:
 
 ## Relations
 
+## External Component Parameters
+
+Use this table whenever a parent component instance contains an external `<Button .../>` or `<Label .../>` parameter node. The target component's root `extention`, allowed attributes, localization keys, and all referenced `ui://` URLs must be validated.
+
+| Parent Component | Instance | Target Component | Extension | Title Override | Icon Override | Selected Override | Localization Key | Validation Status |
+|---|---|---|---|---|---|---|---|---|
+
 ## Unity Bindings
 
 | Field | Type | FairyGUI Path | Notes |
 |---|---|---|---|
 
 ## Automation Risks
+```
+
+## semantic_controller_mapping_report.json
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-01-01T00:00:00Z",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "xmlDir": null,
+  "errors": [],
+  "warnings": [],
+  "summary": {
+    "components": 4,
+    "stateGroups": 12,
+    "controllers": 4,
+    "gearMappings": 18
+  }
+}
+```
+
+## semantic_controller_mapping_report.md
+
+```md
+# Semantic Controller Mapping Report
+
+- result: PASS
+- stage: xml_generation
+
+## Errors
+
+- none
+
+## Warnings
+
+- none
 ```
 
 ## cut_report.json
@@ -385,6 +524,7 @@ Cell list:
   "requireDesignApproval": true,
   "resourceGeneration": true,
   "embeddedDocsIntegrity": true,
+  "semanticControllerMapping": true,
   "designApproved": true,
   "packageName": "cooking",
   "packageId": "qdf53qpk",
@@ -410,7 +550,7 @@ Cell list:
     "designApproval": "reports/design_approval.json",
     "approvedDesign": "generated/design/screen_design_final.png",
     "referenceImage0": "references/ui_reference.png",
-    "assetImage0": "generated/sliced/bg_main.png"
+    "assetImage0": "fgui_xml/cooking/art/bg_main.png"
   },
   "sourceVersions": {},
   "unresolvedRisks": [],
@@ -429,6 +569,9 @@ Cell list:
   "files_checked": 2,
   "manifest_loaded": true,
   "registry_loaded": true,
+  "package_resource_paths_checked": true,
+  "component_extension_overrides_checked": true,
+  "semantic_controller_mapping_checked": true,
   "error_count": 0,
   "warning_count": 0,
   "issues": []

@@ -27,8 +27,13 @@ Do not generate `package.xml` or component XML unless all of these are available
 - `references/design-mockup-approval-contract.md` when a complete screen design was generated from requirements/design documents
 - a passing `design_approval.json` record for `xml_generation`, bound to the exact approved image SHA-256
 - `references/asset-size-contract.md`
+- `references/semantic-controller-mapping-contract.md`
+- `references/package-resource-path-contract.md`
+- a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
 - valid visual-reference declarations when visual assets were generated or reconstructed
 - `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap
+- `packageRelativeFile` for every file-backed package resource
+- staged files present at `package.outputPath/packageRelativeFile`
 
 If anything is missing, output `XML生成阻塞报告` instead of XML.
 
@@ -36,6 +41,7 @@ When project files are accessible, enforce this gate with:
 
 ```bash
 python scripts/verify_embedded_docs.py
+python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
 
@@ -52,7 +58,7 @@ The full XML spec includes rules that must not be dropped:
 - common object attributes and filter attributes
 - `image`, `loader`, `text`, `richtext`, `graph`, `list`, and `group`
 - extension nodes: `Button`, `Label`, `ComboBox`, `ProgressBar`, `Slider`, `ScrollBar`, `Tree`
-- extension parameter child nodes on component instances, such as `<component ...><Label icon="ui://..."/></component>`, when confirmed by FairyGUI editor export/cleanup
+- extension parameter child nodes on component instances, such as `<component ...><Button title="..." icon="ui://..."/></component>` and `<component ...><Label title="..." icon="ui://..."/></component>`, including target-extension matching and URL validation
 - internal child naming conventions for extension components
 - editor-export compatibility attributes that appear in verified FairyGUI project XML
 - Relation system and `sidePair` values
@@ -72,7 +78,7 @@ The full XML spec includes rules that must not be dropped:
 - package resource IDs are stable lowercase alphanumeric IDs copied from `package.xml`, `asset_manifest.json`, or `fgui_id_registry.json`. The default generator may create 5-character IDs, but existing FairyGUI exports/examples can contain other lowercase alphanumeric lengths.
 - component instance IDs should follow `n{index}_{packageIdLast4}` for newly generated XML, but valid existing exported IDs should be preserved during repair unless the user asks to normalize them.
 - `src` is a resource ID, not an asset name and not a file name.
-- `fileName` is the file path/name.
+- `fileName` is the exact package-relative file path from Manifest `packageRelativeFile`, not the UIProduction-root-relative `file` path.
 - Every fresh `<image>` has explicit `size` equal to Manifest `displaySize`.
 - The real bitmap dimensions equal Manifest `sourcePixelSize`.
 - Undeclared scaling is forbidden; size differences require an allowed `scalePolicy`.
@@ -80,9 +86,13 @@ The full XML spec includes rules that must not be dropped:
 - `ui://` URLs are `ui://{packageId}{resourceId}` with no slash or separator.
 - `component@name` inside `package.xml` is the XML file name, such as `login_panel.xml`.
 - package resource `path` starts and ends with `/`.
+- `package.xml path + name` resolves to a real file under the directory containing `package.xml`.
+- fresh validation uses exact package-relative paths; basename-only equality is forbidden.
 - output XML is a draft until opened, checked, and published by FairyGUI editor.
 
 ## Validation Profiles
+
+The XML validator must inspect component-instance extension parameter nodes, not merely allow their tag names. It must resolve the target component XML and verify matching `extention`, legal override attributes, and registered `ui://` references.
 
 Use two modes when judging XML:
 
@@ -100,7 +110,17 @@ Apply the selected profile as follows:
 
 Known editor-compatible attributes seen in the project include `designImageOffsetY`, `aspect`, `group`, `controller`, `advanced`, `anchor`, `clearOnPublish`, `autoClearText`, `autoPlay`, and `autoPlayRepeat`. Treat these as allowed compatibility attributes during review/repair. For fresh AI XML, only emit them when the current component actually needs the editor behavior and the reason is recorded in `fgui_spec.md`.
 
-A child extension node such as `<Label icon="ui://..."/>` under a `<component>` instance is valid as an external parameter/override pattern when FairyGUI editor accepts it. Do not flag this pattern as pseudo XML.
+A child extension node such as `<Button title="..." icon="ui://..."/>` or `<Label title="..." icon="ui://..."/>` under a `<component>` instance is a valid external parameter/override pattern when the referenced component has the matching `extention`. Do not flag these patterns as pseudo XML.
+
+For fresh XML, validate all of the following:
+
+- the component instance `src` resolves to a component resource
+- the referenced component XML root `extention` matches the child node tag exactly
+- only attributes allowed by that extension type are used
+- `icon`, `selectedIcon`, `sound`, and other `ui://` attributes resolve to registered package resources
+- conflicting extension parameter child nodes are forbidden
+
+For editor-compatible XML, preserve editor-accepted override nodes, but broken component references, mismatched extension types, and unresolved URLs remain errors.
 
 ## Forbidden Output
 
@@ -111,8 +131,14 @@ Never output XML containing:
 - `src` values that match asset names or file names instead of registered resource IDs
 - `ui://` URLs that do not resolve to registered package/resource IDs
 - controller, gear, relation, transition references that cannot be checked from the component tree
+- Controller pages or Gear mappings that cannot be traced to requirement/design evidence and `component_state_map.json`
 - image sizes that conflict with Manifest `displaySize`
 - bitmap files whose actual pixels conflict with `sourcePixelSize`
+- `package.xml` resources whose `path + name` do not exist under the package directory
+- component `fileName` values that contain the UIProduction output prefix instead of `packageRelativeFile`
+- component instance extension parameter nodes whose tag does not match the referenced component root `extention`
+- Button/Label external `icon`, `selectedIcon`, or `sound` URLs that do not resolve to registered resources
+- unsupported attributes on external Button/Label override nodes
 - visual-resource generation without a valid primary reference image
 - XML generated from a pending, rejected, superseded, modified, or AI-self-approved full-screen design
 

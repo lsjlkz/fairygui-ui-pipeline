@@ -112,11 +112,16 @@ def validate_manifest(manifest: dict[str, Any], report: dict[str, Any]) -> None:
 
     package = manifest.get("package", {})
     expect(isinstance(package, dict), report, "package must be an object", "package")
+    package_output_path: str | None = None
     if isinstance(package, dict):
         name = package.get("name")
         expect(isinstance(name, str) and bool(name), report, "package.name is required", "package.name")
         if isinstance(name, str):
             warn(bool(NAME_RE.match(name)), report, "package.name should be lowercase snake_case", "package.name")
+        output_path = package.get("outputPath")
+        expect(isinstance(output_path, str) and bool(output_path), report, "package.outputPath is required", "package.outputPath")
+        if isinstance(output_path, str) and output_path:
+            package_output_path = str(PurePosixPath(output_path.replace("\\", "/"))).strip("/")
 
     sheets = manifest.get("sheets", [])
     assets = manifest.get("assets", [])
@@ -179,6 +184,34 @@ def validate_manifest(manifest: dict[str, Any], report: dict[str, Any]) -> None:
                 display_size = asset.get("displaySize")
                 scale_policy = asset.get("scalePolicy")
                 render_mode = asset.get("renderMode")
+                package_relative_file = asset.get("packageRelativeFile")
+                expect(
+                    isinstance(package_relative_file, str) and bool(package_relative_file),
+                    report,
+                    "bitmap asset.packageRelativeFile is required",
+                    f"{base}.packageRelativeFile",
+                )
+                if isinstance(package_relative_file, str) and package_relative_file:
+                    package_relative_raw = package_relative_file.replace("\\", "/")
+                    package_relative_path = PurePosixPath(package_relative_raw)
+                    package_relative_normalized = str(package_relative_path).lstrip("./")
+                    expect(
+                        not package_relative_raw.startswith("/")
+                        and not package_relative_path.is_absolute()
+                        and ".." not in package_relative_path.parts,
+                        report,
+                        "asset.packageRelativeFile must be a safe package-relative path",
+                        f"{base}.packageRelativeFile",
+                    )
+                    if package_output_path and isinstance(file_value, str):
+                        expected_project_file = str(PurePosixPath(package_output_path) / PurePosixPath(package_relative_normalized))
+                        actual_project_file = str(PurePosixPath(file_value.replace("\\", "/"))).lstrip("./")
+                        expect(
+                            actual_project_file == expected_project_file,
+                            report,
+                            f"asset.file must equal package.outputPath/packageRelativeFile: expected={expected_project_file}",
+                            f"{base}.file",
+                        )
                 expect(is_pair(source_size), report, "asset.sourcePixelSize must be [width,height]", f"{base}.sourcePixelSize")
                 expect(is_pair(display_size), report, "asset.displaySize must be [width,height]", f"{base}.displaySize")
                 expect(scale_policy in SCALE_POLICIES, report, "asset.scalePolicy is invalid", f"{base}.scalePolicy")

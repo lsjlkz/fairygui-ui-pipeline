@@ -8,7 +8,7 @@ Do not generate FairyGUI XML directly from a design image.
 
 When the design was generated from requirements or design documents, first run `scripts/check_design_approval.py --stage layout_analysis`. A draft, pending, rejected, superseded, modified, or AI-self-approved image is not a valid layout source.
 
-Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md` first and use `component_state_map.json` as the semantic source of truth.
+Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md` and `references/semantic-controller-mapping-contract.md` first and use `component_state_map.json` as the semantic source of truth.
 
 Keep this contract generic. It defines required files, fields, gates, and review rules. It must not contain project-specific screen names, concrete coordinates, asset file names, package IDs, resource IDs, or component instance IDs. Store those in the active project's `UIProduction` directory.
 
@@ -85,6 +85,8 @@ Object fields:
 - `bbox`
 - `binding`
 - `stateOwner`
+- `runtimeRole`
+- `requirementIds`
 - `slicePolicy`: `slice_static`, `use_component`, `use_manifest_asset`, `runtime_generated`, or `do_not_slice`
 - `assetName`: required for bitmap/image objects; must resolve to `asset_manifest.json.assets[].name`
 - `sizeSource`: normally `asset_manifest.displaySize`
@@ -103,6 +105,7 @@ Slot fields:
 - `binding`
 - `stateOwner`
 - `runtimeRole`
+- `requirementIds`
 
 ## Same Component / Different State Rule
 
@@ -159,6 +162,7 @@ Main panel XML cannot be generated from a design image unless all are available 
 - `asset_manifest.json` with `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap
 - `fgui_id_registry.json`
 - `fgui_spec.md`
+- a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
 - full FairyGUI XML parsing specification
 - either `layout_overlay_preview.png` reviewed, or a written risk acceptance that overlay review was skipped
 
@@ -178,4 +182,7 @@ When reviewing a design-to-layout pass, report:
 - image objects whose `assetName` is missing or unresolved
 - mismatches between Manifest `displaySize` and layout `bbox` size
 - mismatches between `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, and existing XML
+- requirement-defined states missing from semantic components or Controller pages
+- stateful objects whose `stateOwner` conflicts with semantic ownership
+- semantic Gear requirements missing from `fgui_spec.md` or component XML
 - changes needed before XML generation

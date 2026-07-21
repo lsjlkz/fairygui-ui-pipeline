@@ -378,6 +378,46 @@ UIMake/GameUI/assets/
 - `icon`: 图标对象
 - `button`: 按钮控制器
 
+#### 组件实例外部参数写法
+
+当一个组件资源本身是 `extention="Button"`，并且在父组件的 `displayList` 中以 `<component>` 实例方式引用时，可以通过子节点 `<Button .../>` 为该实例覆盖标题、图标和按钮属性：
+
+```xml
+<component id="n7_d001" name="btn_strategy" src="btn01" fileName="btn_action.xml" xy="66,158" size="552,54">
+  <Button
+    title="@ui_strategy"
+    icon="ui://twbnd001ico03"
+    titleColor="#ffffff"
+    titleFontSize="20"
+  />
+</component>
+```
+
+这种 `<Button .../>` 是对被引用 Button 组件实例的外部属性覆盖/传参，不是伪标签。允许覆盖的属性包括：
+
+- `title`
+- `titleColor`
+- `titleFontSize`
+- `icon`
+- `selectedTitle`
+- `selectedIcon`
+- `sound`
+- `soundVolumeScale`
+- `mode`
+- `downEffect`
+- `downEffectValue`
+- `relatedController`
+- `relatedPageId`
+- `selected`
+
+使用该模式时必须满足：
+
+1. `src` 对应的目标组件 XML 根节点确实声明 `extention="Button"`。
+2. 目标 Button 组件内部需要按约定提供 `title`、`icon` 和 `button` 控制器；缺少对应内部对象时，外部属性可能无法正确生效。
+3. `icon`、`selectedIcon`、`sound` 等 `ui://` 值必须解析到已注册资源。
+4. 正式文案仍应使用多语言 key，不应把标题烘焙到按钮图片中。
+5. AI 新生成 XML 时，只有在目标扩展类型、可覆盖字段和资源引用都可验证时才能生成该子节点；无法验证时应阻塞或留给 FairyGUI 编辑器处理。
+
 ### 5.2 `<Label>` 标签组件
 
 ```xml
@@ -411,6 +451,61 @@ UIMake/GameUI/assets/
 ```
 
 这种 `<Label .../>` 是对被引用 Label 组件的外部属性覆盖/传参，不是伪标签。只要 FairyGUI 编辑器能够打开、清洗并保存该 XML，生成器和校验器应将其视为合法兼容写法。AI 新生成时可以使用该模式，但必须确认目标组件资源确实是 Label 扩展组件，且 `icon/title/titleColor/titleFontSize` 等参数符合 Label 属性表。
+
+完整示例：
+
+```xml
+<component id="n22_v5to" name="com_customer_2" src="rtl3a" fileName="item/customer/com_customer.xml" xy="594,226" size="190,354">
+  <Label
+    title="@ui_customer_name"
+    icon="ui://t8qmfnu2v5to5c"
+    titleColor="#ffffff"
+    titleFontSize="24"
+  />
+</component>
+```
+
+使用该模式时必须满足：
+
+1. `src` 对应的目标组件 XML 根节点确实声明 `extention="Label"`。
+2. 目标 Label 组件内部需要按约定提供 `title` 和 `icon` 对象；缺少对应对象时，外部属性可能无法正确生效。
+3. `icon` 中的 `ui://` 值必须解析到已注册资源。
+4. 正式标题应使用多语言 key。
+5. AI 新生成 XML 时必须验证目标扩展类型和覆盖字段；不能仅因为子节点名称合法就默认覆盖一定生效。
+
+### 5.2.1 组件实例扩展参数覆盖通用规则
+
+父组件中的 `<component>` 实例可以包含一个与目标组件扩展类型一致的扩展参数子节点。常见形式包括：
+
+```xml
+<component src="button_resource_id" fileName="button.xml">
+  <Button title="@ui_confirm" icon="ui://packageidresourceid"/>
+</component>
+
+<component src="label_resource_id" fileName="label.xml">
+  <Label title="@ui_name" icon="ui://packageidresourceid"/>
+</component>
+```
+
+生成器和校验器必须执行以下检查：
+
+- 通过当前包或 `pkg` 指定的跨包资源找到 `src` 对应的组件 XML。
+- 读取目标组件根节点的 `extention`。
+- 外部参数子节点标签必须与目标 `extention` 完全一致，例如 `Button` 对 `Button`、`Label` 对 `Label`。
+- 一个组件实例不得出现两个相互冲突的扩展参数子节点。
+- 子节点属性必须属于对应扩展类型的合法属性表。
+- 属性中出现的 `ui://` URL 必须解析到已注册包和资源。
+- `title`、`selectedTitle` 等正式文本应遵守项目多语言策略。
+- 编辑器已验证的兼容写法应保留；新生成 XML 则必须完成以上验证后才能输出。
+
+以下写法必须判错：
+
+```xml
+<!-- 目标组件是 extention="Label"，却使用 Button 参数节点 -->
+<component src="label_resource_id" fileName="label.xml">
+  <Button title="错误类型"/>
+</component>
+```
 
 ### 5.3 `<ComboBox>` 下拉框组件
 
@@ -1347,6 +1442,10 @@ AI生成XML后必须生成`xml_validate_report.json`，至少检查以下规则�
 | `transition item type`必须属于合法枚举 | error |
 | 文本对象不应写入正式中文文案，除非标记为测试或占位 | warning |
 | 已通过FairyGUI编辑器清洗/导出的兼容属性和扩展参数节点不得直接判错 | warning/ignore |
+| 外部 Button/Label 参数节点必须与目标组件根节点 `extention` 一致 | error |
+| 外部 Button/Label 参数只能使用对应扩展类型支持的属性 | error |
+| 外部 `icon`、`selectedIcon`、`sound` 等 `ui://` 值必须能在注册表中解析 | error |
+| 外部 `title`、`selectedTitle` 使用硬编码正式文案 | warning |
 
 ### 19.3 资源校验
 
@@ -1567,3 +1666,4 @@ Controller ctrl = comp.GetController("controllerName");
 | 1.1 | 2026-05-07 | 补充命名规范、资源组织规范、AI自动生成约束章节 |
 | 1.2 | 2026-06-24 | 补充Manifest映射、ID注册表、自动化边界、XML校验、UI适配、多语言和正式流水线章节 |
 | 1.3 | 2026-06-29 | 补充FairyGUI编辑器导出兼容属性、Label组件实例外部传参写法和对应校验规则 |
+| 1.4 | 2026-07-21 | 补充Button/Label组件实例外部标题与图标覆盖、扩展类型匹配、允许字段和URL校验规则 |

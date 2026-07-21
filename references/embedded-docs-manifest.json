@@ -13,10 +13,10 @@
     {
       "path": "references/fairygui-xml-parsing-specification.md",
       "sourceProvenance": "D:/ChatGPTShare/AI文档/FairyGUI-XML解析规范.md",
-      "expectedBytes": 49163,
+      "expectedBytes": 53358,
       "firstHeading": "# FairyGUI XML解析规范",
       "lastRequiredHeading": "## 二十五、版本历史",
-      "requiredTailText": "| 1.3 | 2026-06-29 | 补充FairyGUI编辑器导出兼容属性、Label组件实例外部传参写法和对应校验规则 |"
+      "requiredTailText": "| 1.4 | 2026-07-21 | 补充Button/Label组件实例外部标题与图标覆盖、扩展类型匹配、允许字段和URL校验规则 |"
     }
   ],
   "notes": [

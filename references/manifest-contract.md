@@ -65,7 +65,8 @@ Rules:
 ```json
 {
   "name": "food_patty_raw",
-  "file": "generated/sliced/food_patty_raw.png",
+  "file": "fgui_xml/cooking/art/food_patty_raw.png",
+  "packageRelativeFile": "art/food_patty_raw.png",
   "type": "ingredient",
   "sourcePixelSize": [256, 256],
   "displaySize": [256, 256],
@@ -93,6 +94,7 @@ Required fields:
 
 - `name`
 - `file`
+- `packageRelativeFile`
 - `type`
 - `sourcePixelSize`
 - `displaySize`
@@ -103,6 +105,14 @@ Required fields:
 - `fgui.resourceType`
 
 The legacy `size` field is not sufficient for new production files. Read `references/asset-size-contract.md` before creating or validating bitmap assets.
+
+Read `references/package-resource-path-contract.md` before staging FairyGUI package resources or generating XML. For every file-backed bitmap resource:
+
+```text
+asset.file == package.outputPath + "/" + asset.packageRelativeFile
+```
+
+`file` is relative to the `UIProduction` root. `packageRelativeFile` is relative to the directory containing `package.xml` and is the only path allowed in fresh component XML `fileName`. Do not write the full `asset.file` value into `package.xml` or component XML.
 
 When `production.generateFullScreenDesign=true`, `production.requiresDesignApproval` must also be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, and obtain a passing approval record before creating this production manifest or entering downstream stages.
 
@@ -130,6 +140,24 @@ Create corresponding FairyGUI controller pages:
 
 - controller: `c_state`
 - pages: `idle,cooking,done,burned`
+
+## External Component Parameter Overrides
+
+When a parent component instance overrides a referenced Button or Label, record the intent in `fgui_spec.md` and keep all referenced resources in the registry.
+
+```xml
+<component src="btn01" fileName="btn_action.xml">
+  <Button title="@ui_confirm" icon="ui://qdf53qpkico01"/>
+</component>
+```
+
+Rules:
+
+- `src` identifies a component resource whose XML root `extention` matches the child node tag.
+- `title` and `selectedTitle` use localization keys for formal UI copy.
+- `icon`, `selectedIcon`, and `sound` use registered `ui://{packageId}{resourceId}` URLs.
+- Override nodes do not create new assets; every referenced icon or sound must already exist in the manifest/registry/package.
+- Unsupported extension attributes and mismatched child tags are blockers.
 
 ## fgui_id_registry.json
 

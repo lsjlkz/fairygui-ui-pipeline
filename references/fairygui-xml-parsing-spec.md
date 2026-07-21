@@ -8,6 +8,8 @@
 references/fairygui-xml-parsing-specification.md
 ```
 
+The complete embedded specification includes Button/Label component-instance external parameter overrides for titles, icons, selected-state values, target `extention` matching, allowed-attribute checks, and `ui://` URL validation.
+
 完整的 AI 自动生成流程原文位于：
 
 ```text

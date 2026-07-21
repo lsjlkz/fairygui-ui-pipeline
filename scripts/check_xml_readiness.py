@@ -19,6 +19,7 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
 from verify_embedded_docs import verify as verify_embedded_docs
 
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9]{8}$")
@@ -148,6 +149,7 @@ def validate_manifest(report: dict[str, Any], path: Path, force_visual_reference
 
     package = manifest.get("package")
     package_name: str | None = None
+    package_output_path: str | None = None
     if not isinstance(package, dict):
         add(report, "blockers", "manifest_package_missing", "manifest.package 必须是对象", path)
     else:
@@ -156,6 +158,11 @@ def validate_manifest(report: dict[str, Any], path: Path, force_visual_reference
             add(report, "blockers", "manifest_package_name_missing", "manifest.package.name 缺失", path)
         else:
             package_name = raw_name
+        raw_output_path = package.get("outputPath")
+        if not isinstance(raw_output_path, str) or not raw_output_path:
+            add(report, "blockers", "manifest_package_output_path_missing", "manifest.package.outputPath 缺失", path)
+        else:
+            package_output_path = str(PurePosixPath(raw_output_path.replace("\\", "/"))).strip("/")
 
     assets = manifest.get("assets")
     if not isinstance(assets, list):
@@ -188,6 +195,20 @@ def validate_manifest(report: dict[str, Any], path: Path, force_visual_reference
                 display_size = asset.get("displaySize")
                 scale_policy = asset.get("scalePolicy")
                 render_mode = asset.get("renderMode")
+                package_relative_file = asset.get("packageRelativeFile")
+                if not isinstance(package_relative_file, str) or not package_relative_file:
+                    add(report, "blockers", "asset_package_relative_file_missing", f"{base}.packageRelativeFile 缺失", path)
+                else:
+                    package_relative_raw = package_relative_file.replace("\\", "/")
+                    package_relative_path = PurePosixPath(package_relative_raw)
+                    package_relative_normalized = str(package_relative_path).lstrip("./")
+                    if package_relative_raw.startswith("/") or package_relative_path.is_absolute() or ".." in package_relative_path.parts:
+                        add(report, "blockers", "asset_package_relative_file_invalid", f"{base}.packageRelativeFile 必须是安全的包内相对路径", path)
+                    if package_output_path and isinstance(file_name, str):
+                        expected_file = str(PurePosixPath(package_output_path) / PurePosixPath(package_relative_normalized))
+                        actual_file = str(PurePosixPath(file_name.replace("\\", "/"))).lstrip("./")
+                        if actual_file != expected_file:
+                            add(report, "blockers", "asset_package_path_mismatch", f"{base}.file 必须等于 package.outputPath/packageRelativeFile: expected={expected_file}, actual={actual_file}", path)
                 if not is_positive_pair(source_size):
                     add(report, "blockers", "asset_source_size_missing", f"{base}.sourcePixelSize 缺失或非法", path)
                 if not is_positive_pair(display_size):
@@ -730,6 +751,7 @@ def main() -> int:
         "requireDesignApproval": args.require_design_approval,
         "resourceGeneration": args.resource_generation,
         "embeddedDocsIntegrity": None,
+        "semanticControllerMapping": None,
         "designApproved": None,
         "packageName": None,
         "packageId": None,
@@ -749,6 +771,9 @@ def main() -> int:
         "visualReferenceContract": skill_root / "references" / "visual-reference-contract.md",
         "designMockupApprovalContract": skill_root / "references" / "design-mockup-approval-contract.md",
         "assetSizeContract": skill_root / "references" / "asset-size-contract.md",
+        "semanticControllerMappingContract": skill_root / "references" / "semantic-controller-mapping-contract.md",
+        "semanticControllerMappingValidator": skill_root / "scripts" / "validate_semantic_controller_mapping.py",
+        "packageResourcePathContract": skill_root / "references" / "package-resource-path-contract.md",
     }
     for contract_name, contract_path in local_contracts.items():
         require_file(report, contract_path, f"{contract_name}_missing", contract_name)
@@ -806,7 +831,9 @@ def main() -> int:
     generates_full_screen = isinstance(production, dict) and production.get("generateFullScreenDesign") is True
     declares_design_approval = isinstance(production, dict) and production.get("requiresDesignApproval") is True
     require_design_approval = args.require_design_approval or generates_full_screen or declares_design_approval
+    design_driven = args.design_driven or generates_full_screen or declares_design_approval
     report["requireDesignApproval"] = require_design_approval
+    report["designDriven"] = design_driven
 
     if args.require_design_approval and not generates_full_screen:
         add(report, "blockers", "full_screen_design_not_declared", "使用 --require-design-approval 时必须设置 production.generateFullScreenDesign=true", manifest_path)
@@ -839,7 +866,7 @@ def main() -> int:
     if require_file(report, fgui_spec_path, "fgui_spec_missing", "fgui_spec.md"):
         validate_fgui_spec(report, fgui_spec_path, manifest)
 
-    if args.design_driven:
+    if design_driven:
         validate_design_driven_inputs(
             report,
             root,
@@ -847,6 +874,24 @@ def main() -> int:
             manifest,
             design_gate_report.get("approvedFile") if design_gate_report.get("approved") else None,
         )
+        semantic_controller_report = validate_semantic_controller_mapping(root, "xml_generation")
+        report["semanticControllerMapping"] = semantic_controller_report.get("ok")
+        for item in semantic_controller_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "semantic_controller_" + item.get("code", "invalid"),
+                item.get("message", "语义状态与 Controller/Gear 映射校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in semantic_controller_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "semantic_controller_" + item.get("code", "warning"),
+                item.get("message", "语义状态与 Controller/Gear 映射警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
 
     if manifest:
         validate_asset_files(report, root, manifest, args.skip_asset_existence, args.profile)
@@ -871,7 +916,7 @@ def main() -> int:
             "fguiSpec": fgui_spec_path,
             **local_contracts,
         }
-        if args.design_driven:
+        if design_driven:
             source_paths.update(
                 {
                     "uxuiSemanticSpec": specs_dir / "uxui_semantic_spec.md",

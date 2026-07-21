@@ -29,8 +29,10 @@ Before producing XML-related output, read:
 5. `references/manifest-contract.md` when manifest or registry files are involved.
 6. `references/visual-reference-contract.md` when visual assets were generated, redrawn, or reconstructed.
 7. `references/design-mockup-approval-contract.md` when a complete screen design was generated from requirements or design documents.
-8. `references/asset-size-contract.md` for every bitmap resource.
-9. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
+8. `references/semantic-controller-mapping-contract.md` whenever states, interactions, Controllers, Gears, or runtime ownership exist.
+9. `references/asset-size-contract.md` for every bitmap resource.
+10. `references/package-resource-path-contract.md` before package staging or XML generation.
+11. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
 
 If either embedded complete source document cannot be read in the current task, or `scripts/verify_embedded_docs.py` reports a failure, do not generate XML.
 
@@ -38,6 +40,7 @@ Before XML generation, verify the embedded complete documents and then run the e
 
 ```bash
 python scripts/verify_embedded_docs.py
+python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
 
@@ -60,9 +63,12 @@ Generate XML only when all of these are known:
 - an approval SHA-256 that still matches the current design bytes
 - approval scope containing `xml_generation`
 - every bitmap's actual pixels, `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode`
-- controller page definitions
+- every file-backed resource's exact `packageRelativeFile`
+- `asset.file == package.outputPath/packageRelativeFile`
+- controller page definitions derived from requirement-defined and design-visible discrete states
+- business state owner, visual state owner, and dynamic-data owner
 - relation targets
-- gear controller/page/value mapping
+- gear controller/page/value mapping for every semantic visual difference
 - transition item types and values
 - text/localization strategy
 - stable instance IDs or permission to allocate them
@@ -77,9 +83,11 @@ The automated readiness gate additionally verifies:
 - stable resource IDs are present and unique
 - an instance ID registry exists
 - required `fgui_spec.md` sections exist
+- requirement State Matrix, semantic components/state groups, layout state ownership, Controllers, and Gear Mapping tables pass `validate_semantic_controller_mapping.py`
 - design-driven semantic, layout, slice, and overlay artifacts exist when required
 - valid primary reference images exist and their declared resolution equals real pixels when resource generation is enabled
 - real files referenced by the manifest exist
+- every staged resource exists under `package.outputPath/packageRelativeFile`
 - actual image pixels equal `sourcePixelSize`
 - layout image bounds equal Manifest `displaySize`
 - fresh XML image sizes equal Manifest `displaySize`
@@ -95,7 +103,7 @@ Before outputting XML, verify these chapters from the full specification:
 | 2. package.xml | root node, resource node types, `id/name/path/exported` |
 | 3. component XML | root `component`, `controller`, `action`, `displayList` |
 | 4. base objects | common attributes, filters, image, loader, text, richtext, graph, list, group |
-| 5. extensions | Button, Label, ComboBox, ProgressBar, Slider, ScrollBar, Tree |
+| 5. extensions | Button, Label, ComboBox, ProgressBar, Slider, ScrollBar, Tree, plus external instance parameter overrides and target `extention` matching |
 | 6. Relation | `relation target`, `sidePair`, parent target handling |
 | 7. Gear | gear tags, controller/page/value/default mapping, tween child |
 | 8. Transition | transition attributes, item attributes, action type enum |
@@ -157,12 +165,15 @@ If any frozen source changes during generation, stop, regenerate the snapshot, r
 Generate in this order:
 
 1. update and freeze `fgui_id_registry.json`
-2. generate `package.xml`
-3. validate the package resource table
-4. generate reusable leaf components with no component dependencies
-5. generate composite components after their children exist
-6. generate the main screen last
-7. generate validation reports and the FairyGUI import checklist
+2. stage every file-backed resource under `package.outputPath/packageRelativeFile`
+3. validate the complete package-local resource bundle
+4. generate `package.xml` from `packageRelativeFile`
+5. validate `package.xml path + name` against the real package directory
+6. generate reusable leaf components with no component dependencies
+7. generate composite components after their children exist
+8. generate the main screen last
+9. validate exact component `fileName` paths
+10. generate validation reports and the FairyGUI import checklist
 
 A parent component may not reference a child whose resource ID is absent from both `package.xml` and the registry. A failed component blocks its dependants, but does not require unrelated IDs or components to be regenerated. Never emit a partially wired main panel.
 
@@ -171,7 +182,7 @@ A parent component may not reference a child whose resource ID is absent from bo
 When reviewing or repairing XML from `GameUI/assets` that has already been accepted or cleaned by FairyGUI editor:
 
 - Preserve editor-compatible attributes such as `designImageOffsetY`, `aspect`, `group`, `controller`, `advanced`, `anchor`, `clearOnPublish`, `autoClearText`, `autoPlay`, and `autoPlayRepeat`.
-- Preserve extension parameter child nodes under component instances, for example `<component ...><Label icon="ui://..."/></component>`.
+- Preserve extension parameter child nodes under component instances, for example `<component ...><Button title="..." icon="ui://..."/></component>` and `<component ...><Label title="..." icon="ui://..."/></component>`.
 - Do not rewrite these compatibility forms into a different structure unless the editor reports an error or the user explicitly asks to normalize them.
 - For fresh AI-generated XML, prefer the core spec attributes and only emit compatibility attributes when the source spec, existing export, or user request requires them.
 
@@ -201,7 +212,9 @@ When reviewing or repairing XML from `GameUI/assets` that has already been accep
 - Preserve existing IDs from the registry.
 - Append new instance IDs instead of renumbering existing display objects.
 - Use `src` for image/component resource IDs.
-- Use `fileName` for real file paths/names and require agreement with the manifest.
+- Use `fileName` for the exact `packageRelativeFile`, not the UIProduction-root-relative `file` path.
+- Build `package.xml path + name` from `packageRelativeFile` and require the represented path to exist under the package directory.
+- Never accept basename-only resource matching in `fresh` mode.
 - Every fresh image node must have explicit `size` equal to Manifest `displaySize`.
 - Actual image pixels must equal `sourcePixelSize`.
 - `pixel_exact` requires source and display sizes to match; every other difference requires an explicit permitted scale policy.
@@ -209,8 +222,10 @@ When reviewing or repairing XML from `GameUI/assets` that has already been accep
 - Use `pkg` only for cross-package references.
 - Use `url`, `icon`, `sound`, `dropdown`, and `defaultItem` only with resolvable `ui://` URLs.
 - Resolve every controller, page, relation target, gear target, transition target, and list item before emission.
+- For every component-instance extension parameter child node, resolve the target component XML, require the child tag to equal the target root `extention`, validate allowed attributes, and resolve all `ui://` values.
 - Do not output pseudo tags, placeholders, unresolved braces, or guessed resource IDs.
 - Do not silently downgrade errors. Accepted exceptions must appear in `fgui_spec.md` and the validation report.
+- Do not generate an XML Controller or Gear plan that cannot be traced back to requirement/design evidence and `component_state_map.json`.
 - Do not claim XML is final until FairyGUI editor opens and publishes it successfully.
 
 ## 10. Post-Generation Validation
@@ -233,7 +248,7 @@ After FairyGUI editor cleanup or export:
 python scripts/validate_fgui_xml.py --xml-dir UIProduction/fgui_xml/<package_name> --manifest UIProduction/manifests/asset_manifest.json --registry UIProduction/manifests/fgui_id_registry.json --mode editor-compatible --out UIProduction/reports/xml_editor_compatible_report.json
 ```
 
-Any hard error prevents the XML from being called ready for import.
+Any hard error prevents the XML from being called ready for import. A validator result that does not check exact package-local resource paths is insufficient.
 
 ## 11. XML Status Lifecycle
 
@@ -255,6 +270,7 @@ Confirm:
 - hierarchy and z-order agree with `fgui_spec.md`
 - controllers switch every declared page
 - gears, relations, and transitions resolve valid objects and values
+- external Button/Label title and icon overrides affect the intended instance, and their extension type matches the referenced component
 - relations behave at target aspect ratios
 - lists instantiate the expected `defaultItem`
 - text and localization keys render correctly

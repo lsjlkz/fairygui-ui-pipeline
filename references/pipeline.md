@@ -25,10 +25,11 @@ Run `python scripts/verify_embedded_docs.py` after installation or migration. An
 9. Production image generation
 10. Sheet slicing
 11. FairyGUI assembly planning
-12. XML draft generation
-13. Validation
-14. FairyGUI editor publish
-15. Unity import and smoke test
+12. FairyGUI package resource staging
+13. XML draft generation
+14. Validation
+15. FairyGUI editor publish
+16. Unity import and smoke test
 
 ## Stage 1: Requirement Intake
 
@@ -133,7 +134,9 @@ Rules:
 - Identify what each visible part is, what it does, and which requirement it supports.
 - Identify component reuse before naming layout objects.
 - If two visible objects are the same component in different states, map them to the same `componentType` with different `instanceId` and `stateVariant`.
-- Record whether state is owned by FairyGUI controllers/gears, GameUI rendering, GamePlay rules, config, or mixed ownership.
+- Record whether business state is owned by GamePlay/Config, visual state by FairyGUI Controller/Gear, and continuous runtime data by GameUI.
+- Use `references/semantic-controller-mapping-contract.md` to decide which objects require Controllers, which visual properties require Gears, and which values must stay runtime-bound.
+- Run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage semantic_analysis` before layout work.
 - Record visible design elements that are not supported by requirements and requirements that are not visible in the design.
 
 The approved design image must be named as the visual source in `uxui_semantic_spec.md`.
@@ -148,11 +151,12 @@ When an approved design image is the layout source, first run the approval gate 
 
 Rules:
 
-- Layout objects must reference semantic output when it exists: `semanticId`, `componentType`, `instanceId`, and `stateVariant`.
+- Layout objects must reference semantic output when it exists: `semanticId`, `componentType`, `instanceId`, `stateVariant`, `stateOwner`, `runtimeRole`, and `requirementIds`.
 - AI may infer regions, objects, slots, and likely component ownership.
 - Do not directly slice stateful or interactive objects from a flat screenshot.
 - Do not generate main panel XML until `component_state_map.json`, `layout_spec.json`, and `slice_plan.json` agree with `fgui_spec.md`.
 - If overlay preview cannot be generated, mark the layout as needing visual review and treat XML as blocked unless the user accepts the risk.
+- Run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage layout_analysis`; unresolved state ownership or state variants block assembly.
 
 ## Stage 8: Asset and Sheet Planning
 
@@ -240,17 +244,45 @@ It must include:
 - layout region table: each visual region's bounds, parent component, anchor/relation strategy, and whether it is static, interactive, or runtime-filled
 - slot table: customer slots, ingredient cells, equipment slots, plate slots, takeout slots, drag/drop hit areas, and their stable names, xy, size, pivot, semantic IDs, and binding IDs
 - component ownership table: which component owns each state, hit area, drag target, list item, and reusable visual element
-- controller table
-- gear mapping table: controller/page to object visibility, icon, text, position, or size changes
+- controller table derived from requirement-defined and design-visible discrete states
+- gear mapping table: controller/page to object visibility, icon, text, position, size, look, color, animation, or font-size changes
+- requirement IDs and state-owner columns in Controller and Gear tables
 - transition table
 - relation/adaptation rules
+- external component parameter table for Button/Label instance title, icon, selected-state, and localization overrides
 - text/localization rules
 - Unity binding fields
 - automation risk notes
 
-## Stage 12: XML Draft Generation
+Before XML readiness, run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage fairygui_assembly`. Missing Controller pages or Gear rows are blockers, not documentation warnings.
 
-Before generation, run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
+## Stage 12: FairyGUI Package Resource Staging
+
+Read `references/package-resource-path-contract.md` before writing XML.
+
+For each file-backed resource:
+
+- declare `asset.packageRelativeFile`
+- require `asset.file == package.outputPath/packageRelativeFile`
+- copy or generate the resource under `fgui_xml/<package>/<packageRelativeFile>`
+- verify the exact staged file exists under the future `package.xml` directory
+- keep project-root paths out of package-local XML
+
+The package directory is an atomic import bundle. Do not copy XML and image files through unrelated partial lists.
+
+Example:
+
+```text
+asset.file: fgui_xml/twinbound_v2/art/icon_anvil.png
+package.outputPath: fgui_xml/twinbound_v2
+packageRelativeFile: art/icon_anvil.png
+```
+
+Only `art/icon_anvil.png` may be used by package-local XML.
+
+## Stage 13: XML Draft Generation
+
+Before generation, run `scripts/validate_semantic_controller_mapping.py --stage xml_generation`, then run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
 
 Generate:
 
@@ -267,17 +299,20 @@ Rules:
 - Use stable IDs from the registry and register new IDs before XML references them.
 - Generate in dependency order: `package.xml`, leaf components, composite components, main panel.
 - Register every referenced component/image in `package.xml`.
+- For external `<Button .../>` and `<Label .../>` instance parameters, require the target component `extention` to match, validate allowed fields, and resolve all `ui://` values.
+- Generate `package.xml path + name` from `packageRelativeFile`, never from the UIProduction-root-relative `file` field.
+- Generate same-package image `fileName` as the exact `packageRelativeFile`.
 - Use resource IDs in `src`; do not use file names as `src`.
 - Every fresh image node must declare `size` equal to Manifest `displaySize`.
 - Real image dimensions must equal `sourcePixelSize`; unexplained scaling is forbidden.
 - Use `ui://<package_id><resource_id>` for component URLs.
 - Keep generated transitions conservative unless the user gives exact timing.
 
-## Stage 13: Validation
+## Stage 14: Validation
 
 Run `scripts/validate_pipeline.py` and write `reports/pipeline_validate_report.json`.
 
-Run `scripts/validate_fgui_xml.py` with `--manifest`, `--registry`, and `--mode fresh` for new XML. After FairyGUI editor cleanup/export, rerun with `--mode editor-compatible` and keep a separate report.
+Run `scripts/validate_fgui_xml.py` with `--manifest`, `--registry`, and `--mode fresh` for new XML. The validator must resolve every `package.xml path + name` and image `fileName` against the exact package directory; basename-only matches are forbidden in fresh mode. After FairyGUI editor cleanup/export, rerun with `--mode editor-compatible` and keep a separate report.
 
 Also manually inspect:
 
@@ -291,7 +326,7 @@ Also manually inspect:
 - text fields and localization keys
 - list default item URLs
 
-## Stage 14: Editor Publish
+## Stage 15: Editor Publish
 
 FairyGUI editor publish remains the official final output step.
 
@@ -302,7 +337,7 @@ Generated XML is considered a draft until:
 - package is published
 - Unity can load the published package
 
-## Stage 15: Unity Smoke Test
+## Stage 16: Unity Smoke Test
 
 Check:
 

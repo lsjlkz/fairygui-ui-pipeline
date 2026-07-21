@@ -25,11 +25,13 @@ Do not use this `SKILL.md`, memory, a summary, a bridge file, or a short contrac
 - Do not jump directly from a design image to layout boxes. When requirements and a design image both exist, first create a semantic UX/UI pass that maps visible parts to purpose, component type, state, and runtime ownership.
 - Keep the pipeline boundary strict: this skill stores generic workflow rules, schemas, gates, and validation logic only. Project-specific screen names, coordinates, component names, resource IDs, package IDs, asset paths, and design-image analysis results must live in that project's `UIProduction` directory.
 - Treat `component_state_map.json` as the source of truth for whether two visible objects are the same component type in different states, or genuinely different components.
+- Determine Controller, Gear, and runtime ownership from the combined requirement documents, UI/UX design documents, and exact approved design image. Never infer controller ownership from visual appearance alone.
 - Treat `asset_manifest.json` as the single source of truth for asset names, sheet positions, source pixel sizes, FairyGUI display sizes, scale policies, states, pivots, and FairyGUI mapping.
 - When visual assets will be generated, redrawn, restyled, or reconstructed, require at least one valid primary reference image and read `references/visual-reference-contract.md` before image generation.
 - When a complete screen is created from requirements or design documents, read `references/design-mockup-approval-contract.md`, create a full-screen mockup, and stop for explicit human confirmation before semantic decomposition or any downstream production stage.
 - The AI must never approve its own mockup. It may create `design_approval.json` with `pending` or `rejected`, but may write `approved` only after the user explicitly confirms the exact design file or a valid human approval record is provided.
 - Read `references/asset-size-contract.md` before planning, slicing, registering, or placing bitmap resources. Unexplained differences between real pixels, manifest sizes, layout sizes, and XML sizes are errors.
+- Read `references/package-resource-path-contract.md` before staging package files or writing XML. Project-root-relative `asset.file` and package-local `packageRelativeFile` are different paths and must never be substituted for each other.
 - Treat `fgui_id_registry.json` as the source of stable package/resource/component IDs. Generate IDs only for new entries; preserve existing IDs on reruns.
 - Generate FairyGUI XML only as a draft unless the user has verified it opens in FairyGUI editor.
 - Keep image text out of bitmap assets by default. Use FairyGUI text fields and localization keys for real UI text.
@@ -118,9 +120,10 @@ A changed or regenerated image invalidates previous approval. Silence, inferred 
 10. Generate or request production image assets: background, standalone images, and transparent sheet images.
 11. Slice sheets according to the manifest: output named PNGs, preview contact sheet, and `cut_report.json`.
 12. Create FairyGUI assembly plan: package, components, display list, semantic component mapping, layout regions, slot grids, component ownership, controllers, gear mappings, transitions, relations, text fields, binding names.
-13. Run XML Strict Mode readiness checks.
-14. Generate and validate XML drafts using stable IDs from `fgui_id_registry.json` only if all gates pass.
-15. Publish with FairyGUI editor and run Unity smoke tests.
+13. Stage the complete package bundle under `package.outputPath`: XML destination plus every file at `packageRelativeFile`.
+14. Run XML Strict Mode readiness checks.
+15. Generate and validate XML drafts using stable IDs from `fgui_id_registry.json` only if all gates pass.
+16. Publish with FairyGUI editor and run Unity smoke tests.
 
 ## XML Strict Mode
 
@@ -141,6 +144,8 @@ Required inputs:
 - `references/xml-strict-generation.md`
 - `references/uxui-semantic-contract.md` when the XML is based on requirements plus a design image
 - `references/design-to-layout-contract.md` when the XML is based on a design image or reference mockup
+- `references/semantic-controller-mapping-contract.md` when components have states, interactions, runtime data, Controllers, or Gears
+- `references/package-resource-path-contract.md` for all package-local file staging, `package.xml path+name`, and component `fileName` work
 - `uxui_semantic_spec.md` and `component_state_map.json` when requirements and a design image are both available
 - `visual_design_brief.md`, `design_approval.json`, and the exact approved full-screen design image when the screen was created from requirements/design documents
 - a passing design approval gate for `xml_generation`
@@ -152,6 +157,8 @@ Required inputs:
 - `references/asset-size-contract.md`
 - valid reference-image declarations when the project generated or reconstructed visual assets
 - explicit `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap asset
+- `package.outputPath` and exact `packageRelativeFile` for every file-backed package asset
+- staged files that exist at `UIProduction/package.outputPath/packageRelativeFile`
 
 If any required input is missing, do not output XML. Output `XML生成阻塞报告` with:
 
@@ -169,7 +176,9 @@ When strict inputs are present:
 - Treat same-component/different-state cases as reusable components with different `instanceId` and `stateVariant`, not as unrelated component types.
 - Cover package resources, component roots, controllers/actions, displayList, base object attributes, filters, image/loader/text/richtext/graph/list/group, Button/Label/ComboBox/ProgressBar/Slider/ScrollBar/Tree, editor-export compatibility attributes, extension parameter child nodes, Relation, Gear, Transition, enums, branch/high-resolution notes, naming, resource organization, manifest mapping, ID stability, adaptation, localization, and validation rules.
 - `src` must be a registered resource ID.
-- `fileName` must be the file path/name.
+- `fileName` must be the exact package-local `packageRelativeFile`, never the UIProduction-root-relative `asset.file`.
+- `package.xml path + name` must resolve to a real resource under the directory containing `package.xml`.
+- A referenced Button or Label component may receive external instance parameters through child `<Button .../>` or `<Label .../>` nodes for titles and icons, but the child tag must match the referenced component root `extention`, all attributes must be valid for that extension, and every `ui://` value must resolve.
 - Every fresh `<image>` must have an explicit `size` equal to the Manifest `displaySize`.
 - The real PNG dimensions must equal Manifest `sourcePixelSize`.
 - `pixel_exact` assets require `sourcePixelSize == displaySize`; all other differences require an explicit allowed scale policy.
@@ -189,11 +198,13 @@ When strict inputs are present:
 1. Run `check_design_approval.py --stage xml_generation` when approval is required, then run `check_xml_readiness.py`. Stop on any blocker.
 2. Freeze the approved design, approval record, manifest, and registry as the generation input snapshot.
 3. Allocate IDs only for new resources/instances; append them to the registry before XML references them.
-4. Generate `package.xml` first and validate its package/resource table.
-5. Generate reusable leaf components, then composite components, then the main screen.
-6. Run structural and cross-source validation in the selected profile.
-7. Produce the import checklist and mark XML as `draft_unverified` until FairyGUI editor accepts it.
-8. After editor cleanup/export, rerun validation using `--mode editor-compatible` and record any accepted compatibility differences.
+4. Stage every resource under `package.outputPath/packageRelativeFile` and validate the complete package bundle.
+5. Generate `package.xml` from package-local paths and validate `path + name` against real files.
+6. Generate reusable leaf components, then composite components, then the main screen.
+7. Validate exact component `fileName` paths; basename-only matches are forbidden in `fresh` mode.
+8. Run structural and cross-source validation in the selected profile.
+9. Produce the import checklist and mark XML as `draft_unverified` until FairyGUI editor accepts it.
+10. After editor cleanup/export, rerun validation using `--mode editor-compatible` and record any accepted compatibility differences.
 
 ### Strict Failure Policy
 
@@ -250,13 +261,17 @@ UIProduction/
 ├── fgui_xml/
 │   └── <package_name>/
 │       ├── package.xml
-│       └── <component>.xml
+│       ├── <component>.xml
+│       └── art/
+│           └── <package_resource>.png
 └── reports/
     ├── design_draft_review.md
     ├── design_approval.json
     ├── design_gate_report.json
     ├── design_gate_blocking_report.md
     ├── semantic_layout_consistency_report.md
+    ├── semantic_controller_mapping_report.json
+    ├── semantic_controller_mapping_report.md
     ├── cut_report.json
     ├── xml_readiness_report.json
     ├── xml_blocking_report.md
@@ -281,6 +296,9 @@ Load only the relevant reference files for the current step:
 - `references/visual-reference-contract.md`: mandatory reference-image gate for visual resource production.
 - `references/design-mockup-approval-contract.md`: full-screen mockup generation, explicit human approval, approval scope, and invalidation rules.
 - `references/asset-size-contract.md`: source pixel, display size, scale-policy, layout, and XML consistency rules.
+- `references/semantic-controller-mapping-contract.md`: requirement/design evidence, state ownership, Controller pages, Gear mappings, layout inheritance, external Button/Label instance parameter semantics, and XML implementation rules.
+- `scripts/validate_semantic_controller_mapping.py`: executable cross-source validator for `ui_spec.md`, `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, and optional component XML.
+- `references/package-resource-path-contract.md`: UIProduction-root paths versus package-local paths, atomic package staging, and exact resource resolution.
 - `references/design-to-layout-contract.md`: design image to layout/slice/XML gated workflow.
 - `references/fairygui-xml-contract.md`: concise XML gate.
 - `references/fairygui-xml-parsing-spec.md`: local alias/index that points only to the embedded `references/fairygui-xml-parsing-specification.md`; it must not depend on an external path.
@@ -303,9 +321,10 @@ Before any downstream stage of a generated full-screen design, run the approval 
 python scripts/check_design_approval.py --root UIProduction --stage semantic_analysis --out UIProduction/reports/design_gate_report.json --report-md UIProduction/reports/design_gate_blocking_report.md
 ```
 
-Before XML generation, run:
+Before XML generation, validate semantic Controller/Gear mapping and then run readiness:
 
 ```bash
+python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
 
@@ -336,10 +355,13 @@ Before calling the pipeline complete, confirm:
 - `scripts/verify_embedded_docs.py` confirms both embedded complete source documents are intact.
 - Blocking requirements were resolved or explicitly asked.
 - Requirement-to-visual semantic mapping exists before layout and XML when a design image is used.
+- Requirement states, semantic ownership, layout state fields, `fgui_spec.md` Controllers/Gears, and existing XML pass `validate_semantic_controller_mapping.py` for the requested stage.
 - Same-component/different-state visual cases are represented as state variants, not separate unrelated components.
 - Visual resource production used at least one valid primary reference image with an explicit role.
 - Full-screen design generation produced `visual_design_brief.md`, an exact approved design image, and a passing human approval gate before any downstream decomposition or production.
 - Manifest, sheet plan, sliced asset names, and FairyGUI resource references agree.
+- Every file-backed asset has `packageRelativeFile`, and `asset.file == package.outputPath/packageRelativeFile`.
+- Every `package.xml path+name` and component `fileName` resolves exactly inside the staged package directory.
 - Actual image pixels, Manifest `sourcePixelSize`, Manifest `displaySize`, layout bounds, and XML image sizes agree under the declared scale policy.
 - IDs are stable through `fgui_id_registry.json`.
 - XML readiness gate passes with no blockers.

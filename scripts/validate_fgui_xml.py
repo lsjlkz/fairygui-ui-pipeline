@@ -8,6 +8,7 @@ The validator focuses on failures that are common in generated XML:
 - src values that use asset names or filenames instead of resource IDs
 - invalid or unregistered ui:// URLs
 - manifest, registry, package.xml, and component XML mismatches
+- Button/Label component-instance extension override mismatches and unresolved override URLs
 - missing required object attributes
 - pseudo tags that FairyGUI cannot parse
 
@@ -28,6 +29,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
 
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9]{8}$")
 RESOURCE_ID_RE = re.compile(r"^[a-z0-9]{2,16}$")
@@ -43,6 +45,23 @@ RENDER_MODES_BY_POLICY = {
     "fit": {"fit", "loader_fit"},
     "fill": {"fill", "loader_fill"},
     "relation_driven": {"relation_driven"},
+}
+
+EXTENSION_OVERRIDE_ALLOWED_ATTRIBUTES = {
+    "Button": {
+        "title", "titleColor", "titleFontSize", "icon", "selectedTitle", "selectedIcon",
+        "sound", "soundVolumeScale", "mode", "downEffect", "downEffectValue",
+        "relatedController", "relatedPageId", "selected",
+    },
+    "Label": {"title", "titleColor", "titleFontSize", "icon"},
+}
+EXTENSION_OVERRIDE_URL_ATTRIBUTES = {"icon", "selectedIcon", "sound"}
+EXTENSION_OVERRIDE_LOCALIZED_TEXT_ATTRIBUTES = {"title", "selectedTitle"}
+EXTENSION_OVERRIDE_REQUIRED_CHILD_NAMES = {
+    "title": "title",
+    "selectedTitle": "title",
+    "icon": "icon",
+    "selectedIcon": "icon",
 }
 
 PLACEHOLDERS = [
@@ -96,17 +115,6 @@ def read_json(path: str | None) -> tuple[dict[str, Any], str | None]:
 def normalize_path(value: str) -> str:
     return str(PurePosixPath(value.replace("\\", "/"))).lstrip("./")
 
-
-def path_matches(actual: str, expected: str) -> bool:
-    """Allow project-relative and generated-relative forms of the same asset path."""
-    actual_norm = normalize_path(actual)
-    expected_norm = normalize_path(expected)
-    return (
-        actual_norm == expected_norm
-        or actual_norm.endswith("/" + expected_norm)
-        or expected_norm.endswith("/" + actual_norm)
-        or PurePosixPath(actual_norm).name == PurePosixPath(expected_norm).name
-    )
 
 
 def collect_registry(registry: dict[str, Any]) -> dict[str, Any]:
@@ -171,6 +179,7 @@ def collect_manifest(manifest: dict[str, Any], manifest_path: str | None = None)
 
     package = manifest.get("package", {})
     package_name = package.get("name") if isinstance(package, dict) else None
+    package_output_path = package.get("outputPath") if isinstance(package, dict) else None
 
     project_root = None
     if manifest_path:
@@ -180,6 +189,7 @@ def collect_manifest(manifest: dict[str, Any], manifest_path: str | None = None)
         "assets_by_name": assets_by_name,
         "assets_by_file_name": assets_by_file_name,
         "package_name": package_name,
+        "package_output_path": package_output_path,
         "project_root": project_root,
     }
 
@@ -243,12 +253,183 @@ def resolve_manifest_asset(
     return None
 
 
+def validate_registered_url(
+    source_file: Path,
+    attribute_name: str,
+    value: str,
+    registry_info: dict[str, Any],
+    issues: list[dict[str, str]],
+) -> None:
+    if not value:
+        return
+    match = URL_RE.fullmatch(value)
+    if match is None:
+        issues.append(issue("error", source_file, f"{attribute_name} 必须是合法 ui://包ID资源ID: {value}"))
+        return
+    package_id, resource_id = match.groups()
+    if registry_info["package_ids"] and package_id not in registry_info["package_ids"]:
+        issues.append(issue("error", source_file, f"{attribute_name} 引用未注册包: {value}"))
+        return
+    package_resources = registry_info["resource_ids_by_package_id"].get(package_id, set())
+    if resource_id not in package_resources:
+        issues.append(issue("error", source_file, f"{attribute_name} 引用未注册资源: {value}"))
+
+
+def resolve_package_component_file(package_root: Path, resource_id: str) -> str | None:
+    package_xml = package_root / "package.xml"
+    if not package_xml.is_file():
+        return None
+    try:
+        root = ET.parse(package_xml).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    for element in root.findall(".//component"):
+        if element.attrib.get("id") != resource_id:
+            continue
+        name = element.attrib.get("name", "")
+        path_attr = element.attrib.get("path", "")
+        relative = f"{path_attr.strip('/')}/{name}".strip("/")
+        return normalize_path(relative) if relative else None
+    return None
+
+
+def validate_component_extension_overrides(
+    source_file: Path,
+    component_instance: ET.Element,
+    mode: str,
+    current_package_id: str | None,
+    registry_info: dict[str, Any],
+    package_root: Path,
+    issues: list[dict[str, str]],
+) -> None:
+    override_nodes = [
+        child for child in list(component_instance)
+        if child.tag in EXTENSION_OVERRIDE_ALLOWED_ATTRIBUTES
+    ]
+    if not override_nodes:
+        return
+
+    if len(override_nodes) > 1:
+        issues.append(
+            issue(
+                "error",
+                source_file,
+                f"component 实例 {component_instance.attrib.get('name', '')} 包含多个扩展参数节点: "
+                + ",".join(child.tag for child in override_nodes),
+            )
+        )
+
+    file_name = component_instance.attrib.get("fileName", "")
+    src = component_instance.attrib.get("src", "")
+    target_pkg = component_instance.attrib.get("pkg")
+    if target_pkg and target_pkg != current_package_id:
+        add_mode_issue(
+            issues,
+            mode,
+            source_file,
+            f"跨包组件实例的扩展参数无法从当前包验证目标 extention: pkg={target_pkg}, fileName={file_name}",
+        )
+        target_root = None
+    elif not src:
+        issues.append(issue("error", source_file, "带扩展参数的 component 实例缺少 src"))
+        target_root = None
+    elif not file_name:
+        issues.append(issue("error", source_file, "带扩展参数的 component 实例缺少 fileName"))
+        target_root = None
+    else:
+        target_raw = file_name.replace("\\", "/")
+        target_posix = PurePosixPath(target_raw)
+        registered_file = resolve_package_component_file(package_root, src)
+        if registered_file is None:
+            issues.append(issue("error", source_file, f"component@src 未在 package.xml 注册为组件资源: {src}"))
+            target_root = None
+        elif normalize_path(target_raw) != registered_file:
+            issues.append(
+                issue(
+                    "error",
+                    source_file,
+                    f"component@fileName 与 package.xml 中 src={src} 的组件文件不一致: "
+                    f"XML={normalize_path(target_raw)}, package={registered_file}",
+                )
+            )
+            target_root = None
+        elif target_raw.startswith("/") or target_posix.is_absolute() or ".." in target_posix.parts:
+            issues.append(issue("error", source_file, f"component@fileName 必须是安全的包内相对路径: {file_name}"))
+            target_root = None
+        else:
+            target_file = package_root / normalize_relative_path(registered_file)
+            if not target_file.is_file():
+                issues.append(issue("error", source_file, f"扩展参数目标组件 XML 不存在: {registered_file} -> {target_file}"))
+                target_root = None
+            else:
+                try:
+                    target_root = ET.parse(target_file).getroot()
+                except (OSError, ET.ParseError) as exc:
+                    issues.append(issue("error", source_file, f"无法读取扩展参数目标组件 XML: {target_file}: {exc}"))
+                    target_root = None
+
+    for override in override_nodes:
+        allowed = EXTENSION_OVERRIDE_ALLOWED_ATTRIBUTES[override.tag]
+        unsupported = sorted(set(override.attrib) - allowed)
+        if unsupported:
+            add_mode_issue(
+                issues,
+                mode,
+                source_file,
+                f"外部 {override.tag} 参数包含不支持的属性: {','.join(unsupported)}",
+            )
+
+        if target_root is not None:
+            if target_root.tag != "component":
+                issues.append(issue("error", source_file, f"扩展参数目标文件根节点不是 component: {file_name}"))
+            target_extension = target_root.attrib.get("extention", "")
+            if target_extension != override.tag:
+                issues.append(
+                    issue(
+                        "error",
+                        source_file,
+                        f"外部参数节点 <{override.tag}> 与目标组件 extention 不匹配: "
+                        f"target={target_extension or '<none>'}, fileName={file_name}",
+                    )
+                )
+
+            target_child_names = {
+                elem.attrib.get("name")
+                for elem in target_root.iter()
+                if isinstance(elem.attrib.get("name"), str)
+            }
+            for attribute_name, required_child_name in EXTENSION_OVERRIDE_REQUIRED_CHILD_NAMES.items():
+                value = override.attrib.get(attribute_name)
+                if value and required_child_name not in target_child_names:
+                    add_mode_issue(
+                        issues,
+                        mode,
+                        source_file,
+                        f"外部 {override.tag}@{attribute_name} 无法映射到目标组件内部对象 "
+                        f"name={required_child_name}: {file_name}",
+                    )
+
+        for attribute_name, value in override.attrib.items():
+            if attribute_name in EXTENSION_OVERRIDE_URL_ATTRIBUTES:
+                validate_registered_url(source_file, f"{override.tag}@{attribute_name}", value, registry_info, issues)
+            elif attribute_name in EXTENSION_OVERRIDE_LOCALIZED_TEXT_ATTRIBUTES:
+                if value and not value.startswith("@"):
+                    issues.append(
+                        issue(
+                            "warning",
+                            source_file,
+                            f"外部 {override.tag}@{attribute_name} 使用硬编码正式文案，建议改为多语言 key: {value}",
+                        )
+                    )
+
+
 def validate_file(
     path: Path,
     mode: str,
     current_package_id: str | None,
     registry_info: dict[str, Any],
     manifest_info: dict[str, Any],
+    package_root: Path,
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     text = path.read_text(encoding="utf-8-sig")
@@ -288,7 +469,16 @@ def validate_file(
             seen_ids.add(elem_id)
 
         if root.tag == "packageDescription":
-            validate_package_element(path, elem, mode, current_package_id, registry_info, issues)
+            validate_package_element(
+                path,
+                elem,
+                mode,
+                current_package_id,
+                registry_info,
+                manifest_info,
+                package_root,
+                issues,
+            )
         elif root.tag == "component":
             validate_component_element(
                 path,
@@ -298,6 +488,7 @@ def validate_file(
                 current_package_id,
                 registry_info,
                 manifest_info,
+                package_root,
                 issues,
             )
 
@@ -310,6 +501,8 @@ def validate_package_element(
     mode: str,
     current_package_id: str | None,
     registry_info: dict[str, Any],
+    manifest_info: dict[str, Any],
+    package_root: Path,
     issues: list[dict[str, str]],
 ) -> None:
     if elem.tag == "packageDescription":
@@ -348,6 +541,38 @@ def validate_package_element(
         if not path_attr.startswith("/") or not path_attr.endswith("/"):
             add_mode_issue(issues, mode, path, f"资源 path 应以 / 开头并以 / 结尾: {path_attr}")
 
+        relative_raw = f"{path_attr.strip('/')}/{name}".strip("/")
+        relative_path = PurePosixPath(relative_raw.replace("\\", "/"))
+        relative_value = str(relative_path)
+        relative_parts = relative_path.parts
+        if not relative_value or relative_path.is_absolute() or ".." in relative_parts:
+            issues.append(issue("error", path, f"package.xml 资源路径非法: path={path_attr}, name={name}"))
+        else:
+            resource_file = package_root / normalize_relative_path(relative_value)
+            if not resource_file.is_file():
+                issues.append(
+                    issue(
+                        "error",
+                        path,
+                        f"package.xml 资源文件不存在（按包根目录解析）: {relative_value} -> {resource_file}",
+                    )
+                )
+
+        if elem.tag == "image" and resource_id:
+            asset = resolve_manifest_asset(current_package_id, resource_id, registry_info, manifest_info)
+            if asset is not None:
+                expected_relative = asset.get("packageRelativeFile")
+                if not isinstance(expected_relative, str) or not expected_relative:
+                    issues.append(issue("error", path, f"manifest 资源 {asset.get('name')} 缺少 packageRelativeFile"))
+                elif normalize_path(expected_relative) != relative_value:
+                    issues.append(
+                        issue(
+                            "error",
+                            path,
+                            f"package.xml path+name 与 manifest.packageRelativeFile 不一致: XML={relative_value}, manifest={expected_relative}",
+                        )
+                    )
+
 
 def validate_component_element(
     path: Path,
@@ -357,6 +582,7 @@ def validate_component_element(
     current_package_id: str | None,
     registry_info: dict[str, Any],
     manifest_info: dict[str, Any],
+    package_root: Path,
     issues: list[dict[str, str]],
 ) -> None:
     if elem is root:
@@ -378,6 +604,17 @@ def validate_component_element(
 
         if "name" not in elem.attrib:
             issues.append(issue("error", path, f"<{elem.tag}> 缺少 name"))
+
+    if elem.tag == "component":
+        validate_component_extension_overrides(
+            path,
+            elem,
+            mode,
+            current_package_id,
+            registry_info,
+            package_root,
+            issues,
+        )
 
     if elem.tag == "image":
         src = elem.attrib.get("src", "")
@@ -405,19 +642,33 @@ def validate_component_element(
                 )
             else:
                 expected_file = asset.get("file")
+                expected_package_file = asset.get("packageRelativeFile")
                 source_size = asset.get("sourcePixelSize")
                 display_size = asset.get("displaySize")
                 scale_policy = asset.get("scalePolicy")
                 render_mode = asset.get("renderMode")
 
-                if isinstance(expected_file, str) and file_name and not path_matches(file_name, expected_file):
-                    issues.append(
-                        issue(
-                            "error",
-                            path,
-                            f"image@fileName 与 manifest 不一致: XML={file_name}, manifest={expected_file}",
+                if not isinstance(expected_package_file, str) or not expected_package_file:
+                    issues.append(issue("error", path, f"manifest 资源 {asset.get('name')} 缺少 packageRelativeFile"))
+                elif file_name:
+                    actual_package_raw = file_name.replace("\\", "/")
+                    actual_package_path = PurePosixPath(actual_package_raw)
+                    actual_package_file = str(actual_package_path).lstrip("./")
+                    expected_package_file_normalized = normalize_path(expected_package_file)
+                    if actual_package_raw.startswith("/") or actual_package_path.is_absolute() or ".." in actual_package_path.parts:
+                        issues.append(issue("error", path, f"image@fileName 必须是安全的包内相对路径: {file_name}"))
+                    if actual_package_file != expected_package_file_normalized:
+                        level = "error" if mode == "fresh" else "warning"
+                        issues.append(
+                            issue(
+                                level,
+                                path,
+                                f"image@fileName 必须使用精确包内路径: XML={actual_package_file}, manifest={expected_package_file_normalized}",
+                            )
                         )
-                    )
+                    resolved_package_file = package_root / normalize_relative_path(actual_package_file)
+                    if not resolved_package_file.is_file():
+                        issues.append(issue("error", path, f"image@fileName 在包目录中不存在: {actual_package_file} -> {resolved_package_file}"))
 
                 if not (isinstance(source_size, list) and len(source_size) == 2 and all(isinstance(v, int) and v > 0 for v in source_size)):
                     add_mode_issue(issues, mode, path, f"manifest 资源 {asset.get('name')} 缺少有效 sourcePixelSize")
@@ -600,8 +851,35 @@ def main() -> int:
                 current_package_id,
                 registry_info,
                 manifest_info,
+                xml_dir.resolve(),
             )
         )
+
+    semantic_controller_mapping_checked = False
+    project_root = manifest_info.get("project_root")
+    production = manifest.get("production", {}) if isinstance(manifest, dict) else {}
+    requires_semantic_mapping = (
+        isinstance(project_root, Path)
+        and (
+            (project_root / "specs" / "component_state_map.json").is_file()
+            or (
+                isinstance(production, dict)
+                and (
+                    production.get("generateFullScreenDesign") is True
+                    or production.get("requiresDesignApproval") is True
+                )
+            )
+        )
+    )
+    if requires_semantic_mapping and isinstance(project_root, Path):
+        semantic_controller_mapping_checked = True
+        semantic_report = validate_semantic_controller_mapping(project_root, "xml_generation", xml_dir)
+        for item in semantic_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"semantic controller mapping [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in semantic_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"semantic controller mapping [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
 
     report = {
         "ok": not any(item["level"] == "error" for item in all_issues),
@@ -611,6 +889,9 @@ def main() -> int:
         "files_checked": len(xml_files),
         "manifest_loaded": bool(manifest),
         "registry_loaded": bool(registry),
+        "package_resource_paths_checked": True,
+        "component_extension_overrides_checked": True,
+        "semantic_controller_mapping_checked": semantic_controller_mapping_checked,
         "error_count": sum(1 for item in all_issues if item["level"] == "error"),
         "warning_count": sum(1 for item in all_issues if item["level"] == "warning"),
         "issues": all_issues,

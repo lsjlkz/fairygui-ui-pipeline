@@ -69,14 +69,104 @@ class StrictValidatorTests(unittest.TestCase):
         self.assertIn("fairygui-ai-generation-workflow.md", result.stdout)
         self.assertIn("fairygui-xml-parsing-specification.md", result.stdout)
 
+    def test_semantic_controller_mapping_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"ok": true', result.stdout)
+
+    def test_semantic_controller_missing_page_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root, omit_ready_page=True)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fgui_controller_pages_missing", result.stdout)
+
+    def test_semantic_controller_missing_gear_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root, omit_ready_gear=True)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fgui_gear_mapping_missing", result.stdout)
+
+    def test_xml_missing_planned_gear_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            xml_dir = root / "fgui_xml" / "cooking"
+            xml_dir.mkdir(parents=True, exist_ok=True)
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state" pages="idle,ready"/>
+  <displayList>
+    <image id="n0_test" name="highlight_ready" src="abc12" fileName="highlight.png" size="320,280"/>
+  </displayList>
+</component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_gear_missing", result.stdout)
+
+    def test_validate_fgui_xml_auto_checks_semantic_controller_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir, _ = self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state" pages="idle,ready"/>
+  <displayList>
+    <group id="n1_3qpk" name="highlight_ready"/>
+  </displayList>
+</component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("semantic controller mapping [xml_gear_missing]", result.stdout)
+            self.assertIn('"semantic_controller_mapping_checked": true', result.stdout)
+
     def create_project(self, root: Path, *, instance_id: str = "n0_3qpk") -> tuple[Path, Path]:
         specs = root / "specs"
         manifests = root / "manifests"
         sliced = root / "generated" / "sliced"
         references = root / "references"
         xml_dir = root / "fgui_xml" / "cooking"
+        package_art = xml_dir / "art"
         reports = root / "reports"
-        for directory in (specs, manifests, sliced, references, xml_dir, reports):
+        for directory in (specs, manifests, sliced, references, xml_dir, package_art, reports):
             directory.mkdir(parents=True, exist_ok=True)
 
         fgui_spec = """# FairyGUI Assembly Spec
@@ -162,7 +252,8 @@ class StrictValidatorTests(unittest.TestCase):
             "assets": [
                 {
                     "name": "bg_main",
-                    "file": "generated/sliced/bg_main.png",
+                    "file": "fgui_xml/cooking/art/bg_main.png",
+                    "packageRelativeFile": "art/bg_main.png",
                     "type": "background",
                     "sourcePixelSize": [64, 64],
                     "displaySize": [1920, 1080],
@@ -196,12 +287,13 @@ class StrictValidatorTests(unittest.TestCase):
 
         write_png(references / "ui_reference.png", 64, 64)
         write_png(sliced / "bg_main.png", 64, 64)
+        write_png(package_art / "bg_main.png", 64, 64)
 
         (xml_dir / "package.xml").write_text(
             """<?xml version="1.0" encoding="utf-8"?>
 <packageDescription id="qdf53qpk">
   <resources>
-    <image id="abc12" name="bg_main" path="/"/>
+    <image id="abc12" name="bg_main.png" path="/art/"/>
     <component id="view1" name="cooking_view.xml" path="/"/>
   </resources>
 </packageDescription>
@@ -212,7 +304,7 @@ class StrictValidatorTests(unittest.TestCase):
             f"""<?xml version="1.0" encoding="utf-8"?>
 <component size="1920,1080">
   <displayList>
-    <image id="{instance_id}" name="bg_main" src="abc12" fileName="generated/sliced/bg_main.png" size="1920,1080"/>
+    <image id="{instance_id}" name="bg_main" src="abc12" fileName="art/bg_main.png" size="1920,1080"/>
   </displayList>
 </component>
 """,
@@ -222,6 +314,216 @@ class StrictValidatorTests(unittest.TestCase):
         full_spec = root / "full_xml_spec.md"
         full_spec.write_text("完整规范\n" + ("x" * 10_100), encoding="utf-8")
         return xml_dir, full_spec
+
+    def add_semantic_controller_specs(self, root: Path, *, omit_ready_page: bool = False, omit_ready_gear: bool = False) -> None:
+        specs = root / "specs"
+        specs.mkdir(parents=True, exist_ok=True)
+        (specs / "visual_design_brief.md").write_text(FULL_VISUAL_BRIEF, encoding="utf-8")
+        design_dir = root / "generated" / "design"
+        design_dir.mkdir(parents=True, exist_ok=True)
+        design_path = design_dir / "screen_design_final.png"
+        if not design_path.is_file():
+            write_png(design_path, 1920, 1080)
+        (specs / "ui_spec.md").write_text(
+            """# UI Spec
+
+## State Matrix
+| Component | States | Trigger | Visual Change | Image Needed | Controller | Business Owner | Visual Owner | Dynamic Data Owner | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|
+| EquipmentSlot | idle,ready | timer completed | food and highlight change | yes | state | GamePlay | FGUI | GameUI | REQ-EQUIPMENT-STATE |
+""",
+            encoding="utf-8",
+        )
+        (specs / "uxui_semantic_spec.md").write_text(
+            """# UX/UI Semantic Spec
+
+## Sources
+- specs/ui_spec.md
+- specs/visual_design_brief.md
+- generated/design/screen_design_final.png
+""",
+            encoding="utf-8",
+        )
+        state_map = {
+            "version": "0.1.0",
+            "screen": "cooking_view",
+            "requirementSources": ["specs/ui_spec.md"],
+            "designDocumentSources": ["specs/visual_design_brief.md"],
+            "designSources": ["generated/design/screen_design_final.png"],
+            "components": [
+                {
+                    "componentType": "EquipmentSlot",
+                    "fguiComponent": "equipment_slot",
+                    "purpose": "One cooking equipment slot",
+                    "runtimeOwner": "Mixed",
+                    "businessStateOwner": "GamePlay",
+                    "visualStateOwner": "FGUI",
+                    "dynamicDataOwner": "GameUI",
+                    "states": ["idle", "ready"],
+                    "controllers": ["state"],
+                    "reusable": True,
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                }
+            ],
+            "visualInstances": [],
+            "stateGroups": [
+                {
+                    "componentType": "EquipmentSlot",
+                    "stateName": "idle",
+                    "trigger": "reset",
+                    "visualDifference": "ready highlight hidden",
+                    "runtimeData": [],
+                    "fguiController": "state",
+                    "gearType": ["gearDisplay"],
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                },
+                {
+                    "componentType": "EquipmentSlot",
+                    "stateName": "ready",
+                    "trigger": "timer completed",
+                    "visualDifference": "ready highlight visible",
+                    "runtimeData": ["foodId"],
+                    "fguiController": "state",
+                    "gearType": ["gearDisplay"],
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                },
+            ],
+            "requirementLinks": [],
+            "reviewStatus": "reviewed",
+            "blockingForLayout": False,
+            "blockingForXml": False,
+        }
+        (specs / "component_state_map.json").write_text(
+            json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        layout = {
+            "version": "0.1.0",
+            "screen": "cooking_view",
+            "designResolution": [1920, 1080],
+            "sourceImages": ["generated/design/screen_design_final.png"],
+            "semanticSources": ["specs/component_state_map.json"],
+            "coordinateSystem": {"origin": "top_left", "unit": "px", "space": "design_resolution"},
+            "regions": [],
+            "objects": [
+                {
+                    "name": "equipment_slot_left",
+                    "semanticId": "equipment.slot",
+                    "instanceId": "equipment_slot_left_01",
+                    "componentType": "EquipmentSlot",
+                    "stateVariant": "idle",
+                    "nodeType": "component",
+                    "component": "equipment_slot",
+                    "region": "work_area",
+                    "bbox": [100, 200, 320, 280],
+                    "binding": "equipmentSlotLeft",
+                    "stateOwner": "FGUI",
+                    "runtimeRole": "cook_source",
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "slicePolicy": "use_component",
+                }
+            ],
+            "slots": [],
+            "relations": [],
+            "reviewStatus": "reviewed",
+            "blockingForXml": False,
+        }
+        (specs / "layout_spec.json").write_text(
+            json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (specs / "slice_plan.json").write_text(
+            json.dumps(
+                {
+                    "version": "0.1.0",
+                    "screen": "cooking_view",
+                    "sourceLayout": "specs/layout_spec.json",
+                    "sourceImages": ["generated/design/screen_design_final.png"],
+                    "rules": {
+                        "doNotSliceDynamicStatesFromFlatDesign": True,
+                        "requireOverlayReviewBeforeXml": True,
+                    },
+                    "slices": [],
+                    "blockingForXml": False,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        reports = root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "layout_overlay_review.md").write_text(
+            "# Layout Overlay Review\n\n- status: approved\n",
+            encoding="utf-8",
+        )
+        pages = "idle" if omit_ready_page else "idle,ready"
+        ready_gear_row = "" if omit_ready_gear else "| equipment_slot | state | ready | highlight_ready | gearDisplay | visible | REQ-EQUIPMENT-STATE |\n"
+        fgui_spec = f"""# FairyGUI Assembly Spec
+
+## Package
+| Field | Value |
+|---|---|
+| package name | cooking |
+| package id | qdf53qpk |
+| design resolution | 1920,1080 |
+
+## Components
+| Component | File | Extension | Exported | Purpose |
+|---|---|---|---|---|
+| cooking_view | cooking_view.xml | none | true | main screen |
+| equipment_slot | equipment_slot.xml | none | true | cooking equipment state component |
+
+## Display List
+| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Binding |
+|---|---:|---|---|---|---|---|---|---|---|
+| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | bgMain |
+| cooking_view | 1 | equipment_slot_left | component | none | equipment_slot | 100,200 | 320,280 | layout_spec.bbox | equipmentSlotLeft |
+
+## Layout Region Table
+| Region | Parent | Bounds | Anchor / Relation | Type | Interaction Responsibility |
+|---|---|---|---|---|---|
+| work_area | cooking_view | 0,0,1920,1080 | center | interactive | equipment interaction |
+
+## Slot Table
+| Slot | Component Name | Region | XY | Size | Pivot | Binding | State Owner |
+|---|---|---|---|---|---|---|---|
+| equipment_slot_left | equipment_slot | work_area | 100,200 | 320,280 | top_left | equipmentSlotLeft | FGUI |
+
+## Component Ownership Table
+| Responsibility | Owner Component | Should Not Live In |
+|---|---|---|
+| equipment state visuals | equipment_slot | cooking_view |
+
+## Controllers
+| Component | Controller | Pages | Default | Used By | Requirement IDs | State Owner |
+|---|---|---|---|---|---|---|
+| equipment_slot | state | {pages} | idle | highlight_ready | REQ-EQUIPMENT-STATE | FGUI |
+
+## Gear Mapping Table
+| Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
+|---|---|---|---|---|---|---|
+| equipment_slot | state | idle | highlight_ready | gearDisplay | hidden | REQ-EQUIPMENT-STATE |
+{ready_gear_row}
+## Transitions
+| Component | Transition | Trigger | Draft Behavior | Needs Editor Review |
+|---|---|---|---|---|
+| equipment_slot | none | none | none | false |
+
+## Relations
+| Object | Relation |
+|---|---|
+| bg_main | center |
+
+## Unity Bindings
+| Field | Type | FairyGUI Path | Notes |
+|---|---|---|---|
+| equipmentSlotLeft | GComponent | cooking_view/equipment_slot_left | stateful equipment slot |
+
+## Automation Risks
+| Risk | Status |
+|---|---|
+| none | accepted |
+"""
+        (specs / "fgui_spec.md").write_text(fgui_spec, encoding="utf-8")
 
     def add_design_approval(
         self,
@@ -437,6 +739,7 @@ class StrictValidatorTests(unittest.TestCase):
             _, full_spec = self.create_project(root)
             self.declare_full_screen_design(root)
             self.add_design_approval(root)
+            self.add_semantic_controller_specs(root)
 
             result = self.run_script(
                 "check_xml_readiness.py",
@@ -477,6 +780,179 @@ class StrictValidatorTests(unittest.TestCase):
                 "--mode", "fresh",
             )
             self.assertEqual(xml_validation.returncode, 0, xml_validation.stderr + xml_validation.stdout)
+
+    def test_package_xml_project_relative_path_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir, _ = self.create_project(root)
+            package_path = xml_dir / "package.xml"
+            package_path.write_text(
+                package_path.read_text(encoding="utf-8").replace(
+                    'name="bg_main.png" path="/art/"',
+                    'name="fgui_xml/cooking/art/bg_main.png" path="/"',
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("package.xml 资源文件不存在", result.stdout)
+            self.assertIn("packageRelativeFile", result.stdout)
+
+    def test_component_image_project_relative_file_name_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir, _ = self.create_project(root)
+            component_path = xml_dir / "cooking_view.xml"
+            component_path.write_text(
+                component_path.read_text(encoding="utf-8").replace(
+                    'fileName="art/bg_main.png"',
+                    'fileName="fgui_xml/cooking/art/bg_main.png"',
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("精确包内路径", result.stdout)
+            self.assertIn("在包目录中不存在", result.stdout)
+
+    def add_external_button_override(
+        self,
+        root: Path,
+        *,
+        target_extension: str = "Button",
+        override_tag: str = "Button",
+        icon_url: str = "ui://qdf53qpkabc12",
+        extra_attribute: str = "",
+    ) -> Path:
+        xml_dir = root / "fgui_xml" / "cooking"
+        registry_path = root / "manifests" / "fgui_id_registry.json"
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry["packages"]["cooking"]["resources"]["btn_action.xml"] = "btn01"
+        registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        package_path = xml_dir / "package.xml"
+        package_path.write_text(
+            package_path.read_text(encoding="utf-8").replace(
+                "  </resources>",
+                '    <component id="btn01" name="btn_action.xml" path="/" exported="true"/>\n  </resources>',
+            ),
+            encoding="utf-8",
+        )
+
+        extension_node = target_extension if target_extension in {"Button", "Label"} else "Button"
+        (xml_dir / "btn_action.xml").write_text(
+            f'''<?xml version="1.0" encoding="utf-8"?>
+<component size="240,80" extention="{target_extension}">
+  <displayList>
+    <text id="n0_3qpk" name="title" xy="48,10" size="180,60"/>
+    <loader id="n1_3qpk" name="icon" xy="8,8" size="40,40"/>
+  </displayList>
+  <{extension_node}/>
+</component>
+''',
+            encoding="utf-8",
+        )
+
+        component_path = xml_dir / "cooking_view.xml"
+        extra = f" {extra_attribute}" if extra_attribute else ""
+        component_path.write_text(
+            component_path.read_text(encoding="utf-8").replace(
+                "  </displayList>",
+                f'''    <component id="n1_3qpk" name="btn_confirm" src="btn01" fileName="btn_action.xml" xy="10,10" size="240,80">
+      <{override_tag} title="@ui_confirm" icon="{icon_url}"{extra}/>
+    </component>
+  </displayList>''',
+            ),
+            encoding="utf-8",
+        )
+        return xml_dir
+
+    def test_external_button_title_and_icon_override_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(root)
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"component_extension_overrides_checked": true', result.stdout)
+
+    def test_external_label_title_and_icon_override_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(root, target_extension="Label", override_tag="Label")
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"component_extension_overrides_checked": true', result.stdout)
+
+    def test_external_override_extension_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(root, target_extension="Label", override_tag="Button")
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("extention 不匹配", result.stdout)
+
+    def test_external_override_unregistered_icon_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(root, icon_url="ui://qdf53qpkbad99")
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("引用未注册资源", result.stdout)
+
+    def test_external_override_unsupported_attribute_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(root, extra_attribute='bogus="x"')
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("不支持的属性", result.stdout)
 
     def test_invalid_package_id_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
