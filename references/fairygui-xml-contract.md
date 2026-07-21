@@ -28,6 +28,8 @@ Do not generate `package.xml` or component XML unless all of these are available
 - a passing `design_approval.json` record for `xml_generation`, bound to the exact approved image SHA-256
 - `references/asset-size-contract.md`
 - `references/semantic-controller-mapping-contract.md`
+- `references/component-instance-configuration-contract.md`
+- `references/visual-part-coverage-contract.md`
 - `references/package-resource-path-contract.md`
 - a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
 - valid visual-reference declarations when visual assets were generated or reconstructed
@@ -70,6 +72,8 @@ The full XML spec includes rules that must not be dropped:
 - manifest-to-XML mapping
 - ID registry and stable regeneration rules
 - validation rules
+- per-instance configuration rules for reusable components, including variant defaults and readable preview values
+- visual-part coverage rules for required icons, frames, title decorations, backgrounds, separators, markers, and text nodes
 - UI adaptation and localization rules
 
 ## Non-Negotiable XML Rules
@@ -88,7 +92,12 @@ The full XML spec includes rules that must not be dropped:
 - package resource `path` starts and ends with `/`.
 - `package.xml path + name` resolves to a real file under the directory containing `package.xml`.
 - fresh validation uses exact package-relative paths; basename-only equality is forbidden.
-- output XML is a draft until opened, checked, and published by FairyGUI editor.
+- every reusable visual instance must have a verifiable implementation strategy and exactly one matching parent XML instance.
+- every required visible part declared in `component_visual_parts.json` must resolve to a Manifest asset, XML node, text node, child component, group, or explicitly approved fallback.
+- detailed visual parts may not be silently replaced by Graph without recorded human approval.
+- variant component default Controller pages must match `component_state_map.visualInstances.controllerPages`.
+- approved-design preview text must be readable before runtime localization; unresolved visible `@ui_...` keys are forbidden unless editor resolution is verified.
+- output XML is a draft until opened, visually compared with the approved design, checked, and published by FairyGUI editor.
 
 ## Validation Profiles
 
@@ -139,6 +148,12 @@ Never output XML containing:
 - component instance extension parameter nodes whose tag does not match the referenced component root `extention`
 - Button/Label external `icon`, `selectedIcon`, or `sound` URLs that do not resolve to registered resources
 - unsupported attributes on external Button/Label override nodes
+- semantically different reusable instances that all use an unconfigured default component
+- variant component files whose selected Controller pages disagree with their visual-instance declaration
+- missing visual-instance rows in `fgui_spec.md` or missing parent XML instances
+- missing required visual-part rows, Manifest assets, component nodes, or package resource references
+- detailed visual parts degraded to Graph without explicit human approval
+- approved-design previews containing raw localization keys, blank controls, white placeholder blocks, unintended duplicated default content, or omitted icons/frames/titles
 - visual-resource generation without a valid primary reference image
 - XML generated from a pending, rejected, superseded, modified, or AI-self-approved full-screen design
 

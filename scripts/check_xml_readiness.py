@@ -20,6 +20,7 @@ from typing import Any
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
+from validate_visual_part_coverage import validate as validate_visual_part_coverage
 from verify_embedded_docs import verify as verify_embedded_docs
 
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9]{8}$")
@@ -113,6 +114,8 @@ def validate_manifest(report: dict[str, Any], path: Path, force_visual_reference
         requires_visual_reference = requires_visual_reference or production.get("requiresVisualReference") is True
         if generate_visual_assets and not requires_visual_reference:
             add(report, "blockers", "visual_reference_not_required", "视觉资源生产必须设置 production.requiresVisualReference=true", path)
+        if production.get("generateFullScreenDesign") is True and production.get("requiresVisualPartCoverage") is not True:
+            add(report, "blockers", "visual_part_coverage_not_required", "完整界面设计必须设置 production.requiresVisualPartCoverage=true", path)
 
     references = manifest.get("referenceImages", [])
     primary_count = 0
@@ -392,6 +395,31 @@ def validate_fgui_spec(report: dict[str, Any], path: Path, manifest: dict[str, A
     for heading in REQUIRED_FGUI_SPEC_HEADINGS:
         if heading.lower() not in normalized:
             add(report, "blockers", "fgui_spec_section_missing", f"fgui_spec.md 缺少章节: {heading}", path)
+
+    state_map_path = path.parent / "component_state_map.json"
+    visual_instances: list[dict[str, Any]] = []
+    if state_map_path.is_file():
+        try:
+            state_map = load_json(state_map_path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            add(report, "blockers", "component_state_map_invalid", f"component_state_map.json 无法解析: {exc}", state_map_path)
+        else:
+            raw_instances = state_map.get("visualInstances")
+            if isinstance(raw_instances, list):
+                visual_instances = [item for item in raw_instances if isinstance(item, dict)]
+    if visual_instances:
+        if "instance configuration" not in normalized:
+            add(report, "blockers", "fgui_instance_configuration_section_missing", "component_state_map.visualInstances 非空时，fgui_spec.md 必须包含 Instance Configuration 章节", path)
+        instance_headers, instance_rows = parse_markdown_table(text, "Instance Configuration")
+        required_instance_columns = {
+            "instance id", "xml name", "component type", "component file", "configuration mode",
+            "controller pages", "extension parameters", "preview values", "runtime bindings", "requirement ids",
+        }
+        missing_instance_columns = sorted(required_instance_columns.difference(instance_headers))
+        if missing_instance_columns:
+            add(report, "blockers", "fgui_instance_configuration_columns_missing", f"Instance Configuration 缺少列: {missing_instance_columns}", path)
+        if len(instance_rows) < len(visual_instances):
+            add(report, "blockers", "fgui_instance_configuration_rows_missing", f"Instance Configuration 行数不足: expected>={len(visual_instances)}, actual={len(instance_rows)}", path)
 
     if "|" not in text:
         add(report, "blockers", "fgui_spec_tables_missing", "fgui_spec.md 未检测到表格，无法校验图片尺寸", path)
@@ -752,6 +780,7 @@ def main() -> int:
         "resourceGeneration": args.resource_generation,
         "embeddedDocsIntegrity": None,
         "semanticControllerMapping": None,
+        "visualPartCoverage": None,
         "designApproved": None,
         "packageName": None,
         "packageId": None,
@@ -772,7 +801,10 @@ def main() -> int:
         "designMockupApprovalContract": skill_root / "references" / "design-mockup-approval-contract.md",
         "assetSizeContract": skill_root / "references" / "asset-size-contract.md",
         "semanticControllerMappingContract": skill_root / "references" / "semantic-controller-mapping-contract.md",
+        "componentInstanceConfigurationContract": skill_root / "references" / "component-instance-configuration-contract.md",
+        "visualPartCoverageContract": skill_root / "references" / "visual-part-coverage-contract.md",
         "semanticControllerMappingValidator": skill_root / "scripts" / "validate_semantic_controller_mapping.py",
+        "visualPartCoverageValidator": skill_root / "scripts" / "validate_visual_part_coverage.py",
         "packageResourcePathContract": skill_root / "references" / "package-resource-path-contract.md",
     }
     for contract_name, contract_path in local_contracts.items():
@@ -893,6 +925,25 @@ def main() -> int:
                 Path(item["path"]) if item.get("path") else root,
             )
 
+        visual_part_report = validate_visual_part_coverage(root, "xml_generation")
+        report["visualPartCoverage"] = visual_part_report.get("ok")
+        for item in visual_part_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "visual_part_" + item.get("code", "invalid"),
+                item.get("message", "设计稿视觉部件覆盖校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in visual_part_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "visual_part_" + item.get("code", "warning"),
+                item.get("message", "设计稿视觉部件覆盖警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
     if manifest:
         validate_asset_files(report, root, manifest, args.skip_asset_existence, args.profile)
 
@@ -921,6 +972,7 @@ def main() -> int:
                 {
                     "uxuiSemanticSpec": specs_dir / "uxui_semantic_spec.md",
                     "componentStateMap": specs_dir / "component_state_map.json",
+                    "componentVisualParts": specs_dir / "component_visual_parts.json",
                     "layoutSpec": specs_dir / "layout_spec.json",
                     "slicePlan": specs_dir / "slice_plan.json",
                 }

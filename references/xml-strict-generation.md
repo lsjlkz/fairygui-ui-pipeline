@@ -30,9 +30,11 @@ Before producing XML-related output, read:
 6. `references/visual-reference-contract.md` when visual assets were generated, redrawn, or reconstructed.
 7. `references/design-mockup-approval-contract.md` when a complete screen design was generated from requirements or design documents.
 8. `references/semantic-controller-mapping-contract.md` whenever states, interactions, Controllers, Gears, or runtime ownership exist.
-9. `references/asset-size-contract.md` for every bitmap resource.
-10. `references/package-resource-path-contract.md` before package staging or XML generation.
-11. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
+9. `references/component-instance-configuration-contract.md` whenever a reusable component has multiple semantic instances or per-instance data.
+10. `references/visual-part-coverage-contract.md` for every approved complete-screen design.
+11. `references/asset-size-contract.md` for every bitmap resource.
+12. `references/package-resource-path-contract.md` before package staging or XML generation.
+13. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `component_visual_parts.json`, `layout_spec.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
 
 If either embedded complete source document cannot be read in the current task, or `scripts/verify_embedded_docs.py` reports a failure, do not generate XML.
 
@@ -41,6 +43,7 @@ Before XML generation, verify the embedded complete documents and then run the e
 ```bash
 python scripts/verify_embedded_docs.py
 python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
+python scripts/validate_visual_part_coverage.py --root UIProduction --stage xml_generation --out UIProduction/reports/visual_part_coverage_report.json --report-md UIProduction/reports/visual_part_coverage_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
 
@@ -66,6 +69,8 @@ Generate XML only when all of these are known:
 - every file-backed resource's exact `packageRelativeFile`
 - `asset.file == package.outputPath/packageRelativeFile`
 - controller page definitions derived from requirement-defined and design-visible discrete states
+- every visual instance's `xmlInstanceName`, implementation mode, component file, Controller pages, readable preview values, and runtime bindings
+- every approved-design visual part's importance, complexity, implementation mode, manifest asset or XML node, file scope, and fallback policy
 - business state owner, visual state owner, and dynamic-data owner
 - relation targets
 - gear controller/page/value mapping for every semantic visual difference
@@ -83,7 +88,12 @@ The automated readiness gate additionally verifies:
 - stable resource IDs are present and unique
 - an instance ID registry exists
 - required `fgui_spec.md` sections exist
-- requirement State Matrix, semantic components/state groups, layout state ownership, Controllers, and Gear Mapping tables pass `validate_semantic_controller_mapping.py`
+- requirement State Matrix, semantic components/state groups/visualInstances, layout state ownership, Controllers, Gear Mapping, and Instance Configuration tables pass `validate_semantic_controller_mapping.py`
+- reusable instances with different semantics do not all fall back to one default component
+- variant component default Controller pages and external instance parameters match the semantic plan
+- required icons, frames, title decorations, backgrounds, separators, markers, and text parts declared by the project are covered by Manifest and XML
+- detailed visual parts are not silently degraded to Graph without explicit human approval
+- editor-preview text does not expose unresolved localization keys
 - design-driven semantic, layout, slice, and overlay artifacts exist when required
 - valid primary reference images exist and their declared resolution equals real pixels when resource generation is enabled
 - real files referenced by the manifest exist
@@ -170,10 +180,12 @@ Generate in this order:
 4. generate `package.xml` from `packageRelativeFile`
 5. validate `package.xml path + name` against the real package directory
 6. generate reusable leaf components with no component dependencies
-7. generate composite components after their children exist
-8. generate the main screen last
-9. validate exact component `fileName` paths
-10. generate validation reports and the FairyGUI import checklist
+7. generate registered preview-variant components required by Instance Configuration
+8. materialize every required visual part from `component_visual_parts.json`
+9. generate composite components after their children and visual parts exist
+10. generate the main screen last and materialize every visual instance
+11. validate exact component `fileName` paths, default Controller pages, extension parameters, preview values, runtime-binding declarations, required visual nodes, and asset references
+12. generate validation reports and the FairyGUI import checklist
 
 A parent component may not reference a child whose resource ID is absent from both `package.xml` and the registry. A failed component blocks its dependants, but does not require unrelated IDs or components to be regenerated. Never emit a partially wired main panel.
 
@@ -223,6 +235,13 @@ When reviewing or repairing XML from `GameUI/assets` that has already been accep
 - Use `url`, `icon`, `sound`, `dropdown`, and `defaultItem` only with resolvable `ui://` URLs.
 - Resolve every controller, page, relation target, gear target, transition target, and list item before emission.
 - For every component-instance extension parameter child node, resolve the target component XML, require the child tag to equal the target root `extention`, validate allowed attributes, and resolve all `ui://` values.
+- Materialize every `component_state_map.visualInstances` record. A reusable component with different role/state/title/icon/preview data cannot silently use `static_default` for all instances.
+- Materialize every required visible part in `component_visual_parts.json`; omission of a small icon, frame, title decoration, separator, background, marker, or required text is a hard error.
+- Asset-backed parts must resolve to the declared Manifest asset and registered package resource.
+- Detailed visual parts may use Graph only after explicit human approval recorded in the coverage file.
+- For `variant_component`, require the registered target XML's selected Controller pages to match the instance declaration.
+- For `runtime_binding`, provide readable preview fallback values and record the runtime fields.
+- Keep editor-preview text readable; store localization identity separately instead of displaying raw `@ui_...` keys unless editor resolution is verified.
 - Do not output pseudo tags, placeholders, unresolved braces, or guessed resource IDs.
 - Do not silently downgrade errors. Accepted exceptions must appear in `fgui_spec.md` and the validation report.
 - Do not generate an XML Controller or Gear plan that cannot be traced back to requirement/design evidence and `component_state_map.json`.
@@ -271,6 +290,10 @@ Confirm:
 - controllers switch every declared page
 - gears, relations, and transitions resolve valid objects and values
 - external Button/Label title and icon overrides affect the intended instance, and their extension type matches the referenced component
+- every reusable instance displays the intended portrait, icon, title, state, selected page, and preview values
+- every required visual part listed in `component_visual_parts.json` is visible in the intended component
+- no required icon, panel frame, title decoration, separator, background, marker, or text part is missing
+- no white placeholder blocks, blank controls, raw localization keys, or accidental duplicated defaults remain
 - relations behave at target aspect ratios
 - lists instantiate the expected `defaultItem`
 - text and localization keys render correctly

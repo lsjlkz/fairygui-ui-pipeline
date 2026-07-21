@@ -396,6 +396,41 @@ class StrictValidatorTests(unittest.TestCase):
         (specs / "component_state_map.json").write_text(
             json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        visual_parts = {
+            "version": "0.1.0",
+            "screen": "cooking_view",
+            "designSources": ["generated/design/screen_design_final.png"],
+            "components": [
+                {
+                    "componentType": "EquipmentSlot",
+                    "componentFiles": ["equipment_slot.xml"],
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "parts": [
+                        {
+                            "partId": "ready_highlight",
+                            "role": "state_marker",
+                            "required": True,
+                            "visibleInApprovedDesign": True,
+                            "visualImportance": "semantic",
+                            "complexity": "simple",
+                            "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                            "implementation": {
+                                "mode": "group",
+                                "xmlNodeNames": ["highlight_ready"],
+                                "appliesToFiles": ["equipment_slot.xml"],
+                                "nodeMatch": "all",
+                                "fallbackPolicy": "forbidden",
+                            },
+                        }
+                    ],
+                }
+            ],
+            "reviewStatus": "reviewed",
+            "blockingForXml": False,
+        }
+        (specs / "component_visual_parts.json").write_text(
+            json.dumps(visual_parts, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         layout = {
             "version": "0.1.0",
             "screen": "cooking_view",
@@ -503,6 +538,11 @@ class StrictValidatorTests(unittest.TestCase):
 |---|---|---|---|---|---|---|
 | equipment_slot | state | idle | highlight_ready | gearDisplay | hidden | REQ-EQUIPMENT-STATE |
 {ready_gear_row}
+## Visual Part Coverage
+| Component Type | Part ID | Role | Required | Importance | Complexity | Implementation Mode | Asset Name | XML Nodes | Applies To Files | Fallback Policy | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| EquipmentSlot | ready_highlight | state_marker | true | semantic | simple | group | none | highlight_ready | equipment_slot.xml | forbidden | REQ-EQUIPMENT-STATE |
+
 ## Transitions
 | Component | Transition | Trigger | Draft Behavior | Needs Editor Review |
 |---|---|---|---|---|
@@ -524,6 +564,255 @@ class StrictValidatorTests(unittest.TestCase):
 | none | accepted |
 """
         (specs / "fgui_spec.md").write_text(fgui_spec, encoding="utf-8")
+
+    def add_instance_configuration_fixture(
+        self,
+        root: Path,
+        *,
+        selected_page: int = 1,
+        raw_localization_key: bool = False,
+    ) -> Path:
+        self.add_semantic_controller_specs(root)
+        specs = root / "specs"
+        state_map_path = specs / "component_state_map.json"
+        state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+        state_map["visualInstances"] = [
+            {
+                "instanceId": "equipment_slot_left_01",
+                "componentType": "EquipmentSlot",
+                "xmlInstanceName": "equipment_slot_left",
+                "stateVariant": "ready",
+                "controllerPages": {"state": "ready"},
+                "slotRole": "cook_source",
+                "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                "implementation": {
+                    "configurationMode": "variant_component",
+                    "componentFile": "equipment_slot_ready.xml",
+                    "previewValues": {"state": "ready", "title": "READY"},
+                    "runtimeBindings": ["foodId", "state"],
+                },
+            }
+        ]
+        state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        fgui_spec_path = specs / "fgui_spec.md"
+        fgui_spec = fgui_spec_path.read_text(encoding="utf-8")
+        instance_table = """## Instance Configuration
+
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|
+| equipment_slot_left_01 | equipment_slot_left | EquipmentSlot | equipment_slot_ready.xml | variant_component | state=ready | none | state=ready,title=READY | foodId,state | REQ-EQUIPMENT-STATE |
+
+"""
+        fgui_spec = fgui_spec.replace("## Transitions", instance_table + "## Transitions")
+        fgui_spec_path.write_text(fgui_spec, encoding="utf-8")
+
+        xml_dir = root / "fgui_xml" / "cooking"
+        xml_dir.mkdir(parents=True, exist_ok=True)
+        (xml_dir / "cooking_view.xml").write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<component size="1920,1080">
+  <displayList>
+    <component id="n0_3qpk" name="equipment_slot_left" src="slot1" fileName="equipment_slot_ready.xml" xy="100,200" size="320,280"/>
+  </displayList>
+</component>
+""",
+            encoding="utf-8",
+        )
+        generic_xml = """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state" pages="0,idle,1,ready" selected="0"/>
+  <displayList>
+    <group id="n1_3qpk" name="highlight_ready">
+      <gearDisplay controller="state" pages="1"/>
+    </group>
+  </displayList>
+</component>
+"""
+        (xml_dir / "equipment_slot.xml").write_text(generic_xml, encoding="utf-8")
+        preview_text = "@ui_ready" if raw_localization_key else "READY"
+        (xml_dir / "equipment_slot_ready.xml").write_text(
+            f"""<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state" pages="0,idle,1,ready" selected="{selected_page}"/>
+  <displayList>
+    <group id="n2_3qpk" name="highlight_ready">
+      <gearDisplay controller="state" pages="1"/>
+    </group>
+    <text id="n3_3qpk" name="title" xy="0,0" size="120,40" text="{preview_text}"/>
+  </displayList>
+</component>
+""",
+            encoding="utf-8",
+        )
+        return xml_dir
+
+    def test_reusable_different_instances_cannot_use_static_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            state_map["visualInstances"] = [
+                {
+                    "instanceId": "slot_idle",
+                    "componentType": "EquipmentSlot",
+                    "xmlInstanceName": "slot_idle",
+                    "stateVariant": "idle",
+                    "controllerPages": {"state": "idle"},
+                    "slotRole": "source_a",
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "implementation": {
+                        "configurationMode": "static_default",
+                        "componentFile": "equipment_slot.xml",
+                        "previewValues": {"state": "idle"},
+                        "runtimeBindings": ["state"],
+                    },
+                },
+                {
+                    "instanceId": "slot_ready",
+                    "componentType": "EquipmentSlot",
+                    "xmlInstanceName": "slot_ready",
+                    "stateVariant": "ready",
+                    "controllerPages": {"state": "ready"},
+                    "slotRole": "source_b",
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "implementation": {
+                        "configurationMode": "static_default",
+                        "componentFile": "equipment_slot.xml",
+                        "previewValues": {"state": "ready"},
+                        "runtimeBindings": ["state"],
+                    },
+                },
+            ]
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "semantic_analysis",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reusable_instance_configuration_missing", result.stdout)
+
+    def test_variant_component_default_page_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_instance_configuration_fixture(root, selected_page=0)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_variant_controller_default_mismatch", result.stdout)
+
+    def test_variant_component_default_page_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_instance_configuration_fixture(root, selected_page=1)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"visualInstances": 1', result.stdout)
+            self.assertIn('"instanceConfigurations": 1', result.stdout)
+
+    def test_raw_localization_key_in_instance_preview_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_instance_configuration_fixture(root, selected_page=1, raw_localization_key=True)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_preview_raw_localization_key", result.stdout)
+
+    def test_visual_part_role_is_project_defined_not_hardcoded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            coverage_path = root / "specs" / "component_visual_parts.json"
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            coverage["components"][0]["parts"][0]["role"] = "project_specific_ornament_marker"
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_visual_part_coverage.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"ok": true', result.stdout)
+
+    def test_missing_visual_part_asset_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            coverage_path = root / "specs" / "component_visual_parts.json"
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            implementation = coverage["components"][0]["parts"][0]["implementation"]
+            implementation["mode"] = "asset_image"
+            implementation["assetName"] = "missing_required_icon"
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_visual_part_coverage.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing_visual_part_asset", result.stdout)
+
+    def test_detailed_visual_part_graph_without_human_approval_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            coverage_path = root / "specs" / "component_visual_parts.json"
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            part = coverage["components"][0]["parts"][0]
+            part["complexity"] = "detailed"
+            part["implementation"]["mode"] = "graph"
+            part["implementation"]["fallbackPolicy"] = "forbidden"
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_visual_part_coverage.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("visual_part_degraded_to_graph_without_approval", result.stdout)
+
+    def test_required_visual_part_xml_node_missing_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            xml_dir = root / "fgui_xml" / "cooking"
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state" pages="0,idle,1,ready" selected="0"/>
+  <displayList/>
+</component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_visual_part_coverage.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_visual_part_missing", result.stdout)
 
     def add_design_approval(
         self,
@@ -693,6 +982,7 @@ class StrictValidatorTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["production"]["generateFullScreenDesign"] = True
         manifest["production"]["requiresDesignApproval"] = True
+        manifest["production"]["requiresVisualPartCoverage"] = True
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def test_pipeline_validator_blocks_unapproved_full_screen_design(self) -> None:
@@ -712,6 +1002,7 @@ class StrictValidatorTests(unittest.TestCase):
             self.create_project(root)
             self.declare_full_screen_design(root)
             self.add_design_approval(root)
+            self.add_semantic_controller_specs(root)
 
             result = self.run_script("validate_pipeline.py", "--root", str(root))
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)

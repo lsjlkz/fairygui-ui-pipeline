@@ -18,6 +18,7 @@ Recommended top-level shape:
   "production": {
     "generateFullScreenDesign": true,
     "requiresDesignApproval": true,
+    "requiresVisualPartCoverage": true,
     "generateVisualAssets": true,
     "requiresVisualReference": true
   },
@@ -114,7 +115,11 @@ asset.file == package.outputPath + "/" + asset.packageRelativeFile
 
 `file` is relative to the `UIProduction` root. `packageRelativeFile` is relative to the directory containing `package.xml` and is the only path allowed in fresh component XML `fileName`. Do not write the full `asset.file` value into `package.xml` or component XML.
 
-When `production.generateFullScreenDesign=true`, `production.requiresDesignApproval` must also be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, and obtain a passing approval record before creating this production manifest or entering downstream stages.
+When `production.generateFullScreenDesign=true`, both `production.requiresDesignApproval` and `production.requiresVisualPartCoverage` must be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, obtain a passing approval record, and create `specs/component_visual_parts.json` before finalizing the production manifest or entering downstream stages.
+
+## Visual Part Coverage
+
+Every required visible part declared in `specs/component_visual_parts.json` must have an explicit implementation. Asset-backed parts must name an `assets[].name`; Graph fallbacks for detailed parts require explicit human approval; XML node names are validated after generation. Read `references/visual-part-coverage-contract.md`.
 
 When `production.generateVisualAssets=true`, at least one valid primary entry in `referenceImages` is mandatory. Read `references/visual-reference-contract.md` before image generation.
 

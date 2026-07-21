@@ -30,6 +30,7 @@ from typing import Any
 
 from image_metadata import ImageMetadataError, read_image_metadata
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
+from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9]{8}$")
 RESOURCE_ID_RE = re.compile(r"^[a-z0-9]{2,16}$")
@@ -856,6 +857,7 @@ def main() -> int:
         )
 
     semantic_controller_mapping_checked = False
+    visual_part_coverage_checked = False
     project_root = manifest_info.get("project_root")
     production = manifest.get("production", {}) if isinstance(manifest, dict) else {}
     requires_semantic_mapping = (
@@ -881,6 +883,29 @@ def main() -> int:
             item_path = Path(item["path"]) if item.get("path") else xml_dir
             all_issues.append(issue("warning", item_path, f"semantic controller mapping [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
 
+    requires_visual_part_coverage = (
+        isinstance(project_root, Path)
+        and (
+            (project_root / "specs" / "component_visual_parts.json").is_file()
+            or (
+                isinstance(production, dict)
+                and (
+                    production.get("generateFullScreenDesign") is True
+                    or production.get("requiresVisualPartCoverage") is True
+                )
+            )
+        )
+    )
+    if requires_visual_part_coverage and isinstance(project_root, Path):
+        visual_part_coverage_checked = True
+        visual_part_report = validate_visual_part_coverage(project_root, "xml_generation", xml_dir)
+        for item in visual_part_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"visual part coverage [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in visual_part_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"visual part coverage [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
     report = {
         "ok": not any(item["level"] == "error" for item in all_issues),
         "mode": args.mode,
@@ -892,6 +917,8 @@ def main() -> int:
         "package_resource_paths_checked": True,
         "component_extension_overrides_checked": True,
         "semantic_controller_mapping_checked": semantic_controller_mapping_checked,
+        "component_instance_configurations_checked": semantic_controller_mapping_checked,
+        "visual_part_coverage_checked": visual_part_coverage_checked,
         "error_count": sum(1 for item in all_issues if item["level"] == "error"),
         "warning_count": sum(1 for item in all_issues if item["level"] == "warning"),
         "issues": all_issues,

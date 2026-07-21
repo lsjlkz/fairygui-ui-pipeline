@@ -48,6 +48,9 @@ SUPPORTED_GEARS = {
     "gearAnimation", "gearText", "gearIcon", "gearDisplay2", "gearFontSize",
 }
 STAGES = {"semantic_analysis", "layout_analysis", "fairygui_assembly", "xml_generation"}
+INSTANCE_CONFIGURATION_MODES = {
+    "variant_component", "extension_override", "controller_pages", "runtime_binding", "static_default"
+}
 NONE_VALUES = {"", "none", "n/a", "na", "null", "无", "不需要", "runtime", "runtime_only"}
 
 
@@ -429,6 +432,123 @@ def validate_semantic_map(
     return components, state_groups, component_index, aliases_by_type
 
 
+def validate_visual_instances(
+    report: dict[str, Any],
+    path: Path,
+    state_map: dict[str, Any],
+    component_index: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    visual_instances = list_of_objects(state_map.get("visualInstances"))
+    if not visual_instances:
+        return []
+
+    seen_instance_ids: set[str] = set()
+    seen_xml_names: set[str] = set()
+    grouped: dict[str, list[dict[str, Any]]] = {}
+
+    for index, instance in enumerate(visual_instances):
+        instance_id = instance.get("instanceId")
+        component_type = instance.get("componentType")
+        xml_name = instance.get("xmlInstanceName")
+        requirement_ids = split_values(instance.get("requirementIds"))
+        implementation = instance.get("implementation")
+
+        if not isinstance(instance_id, str) or not instance_id:
+            add(report, "errors", "visual_instance_id_missing", f"visualInstances[{index}] 缺少 instanceId", path)
+            continue
+        if instance_id in seen_instance_ids:
+            add(report, "errors", "visual_instance_id_duplicate", f"visualInstances.instanceId 重复: {instance_id}", path)
+        seen_instance_ids.add(instance_id)
+
+        component = find_component(component_index, component_type)
+        if component is None:
+            add(report, "errors", "visual_instance_component_unresolved", f"visualInstances[{index}].componentType 未解析: {component_type}", path)
+            continue
+        grouped.setdefault(normalized(component.get("componentType")), []).append(instance)
+
+        if not isinstance(xml_name, str) or not xml_name:
+            add(report, "errors", "visual_instance_xml_name_missing", f"实例 {instance_id} 缺少 xmlInstanceName", path)
+        elif xml_name in seen_xml_names:
+            add(report, "errors", "visual_instance_xml_name_duplicate", f"xmlInstanceName 重复: {xml_name}", path)
+        else:
+            seen_xml_names.add(xml_name)
+
+        if not requirement_ids:
+            add(report, "errors", "visual_instance_requirement_ids_missing", f"实例 {instance_id} 缺少 requirementIds", path)
+
+        if not isinstance(implementation, dict):
+            add(report, "errors", "visual_instance_implementation_missing", f"实例 {instance_id} 缺少 implementation", path)
+            continue
+
+        mode = implementation.get("configurationMode")
+        component_file = implementation.get("componentFile")
+        preview_values = implementation.get("previewValues")
+        runtime_bindings = implementation.get("runtimeBindings")
+        controller_pages = instance.get("controllerPages")
+        extension_parameters = implementation.get("extensionParameters")
+
+        if mode not in INSTANCE_CONFIGURATION_MODES:
+            add(report, "errors", "visual_instance_configuration_mode_invalid", f"实例 {instance_id} 的 configurationMode 非法: {mode}", path)
+        if not isinstance(component_file, str) or not component_file.endswith(".xml"):
+            add(report, "errors", "visual_instance_component_file_missing", f"实例 {instance_id} 缺少合法 componentFile", path)
+        if not isinstance(preview_values, dict) or not preview_values:
+            add(report, "errors", "visual_instance_preview_values_missing", f"实例 {instance_id} 缺少 previewValues，无法验证编辑器预览", path)
+        if runtime_bindings is not None and not isinstance(runtime_bindings, list):
+            add(report, "errors", "visual_instance_runtime_bindings_invalid", f"实例 {instance_id}.runtimeBindings 必须是数组", path)
+
+        if mode == "variant_component" and not component_file:
+            add(report, "errors", "variant_component_file_missing", f"实例 {instance_id} 使用 variant_component 但未声明 componentFile", path)
+        elif mode == "extension_override":
+            if not isinstance(extension_parameters, dict) or not extension_parameters:
+                add(report, "errors", "extension_override_parameters_missing", f"实例 {instance_id} 使用 extension_override 但未声明 extensionParameters", path)
+        elif mode == "controller_pages":
+            if not isinstance(controller_pages, dict) or not controller_pages:
+                add(report, "errors", "controller_pages_missing", f"实例 {instance_id} 使用 controller_pages 但未声明 controllerPages", path)
+        elif mode == "runtime_binding":
+            if not isinstance(runtime_bindings, list) or not runtime_bindings:
+                add(report, "errors", "runtime_binding_fields_missing", f"实例 {instance_id} 使用 runtime_binding 但 runtimeBindings 为空", path)
+
+        semantic_controllers = {normalized(item) for item in split_values(component.get("controllers"))}
+        if isinstance(controller_pages, dict):
+            for controller_name, page_name in controller_pages.items():
+                if normalized(controller_name) not in semantic_controllers:
+                    add(report, "errors", "visual_instance_controller_unresolved", f"实例 {instance_id} 使用未声明 Controller: {controller_name}", path)
+                if not isinstance(page_name, str) or not page_name:
+                    add(report, "errors", "visual_instance_controller_page_invalid", f"实例 {instance_id}.{controller_name} 的页面无效", path)
+
+    for component_key, instances in grouped.items():
+        component = find_component(component_index, component_key)
+        if component is None or component.get("reusable") is not True or len(instances) <= 1:
+            continue
+        signatures = {
+            json.dumps(
+                {
+                    "stateVariant": item.get("stateVariant"),
+                    "controllerPages": item.get("controllerPages"),
+                    "slotRole": item.get("slotRole"),
+                    "previewValues": (item.get("implementation") or {}).get("previewValues") if isinstance(item.get("implementation"), dict) else None,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for item in instances
+        }
+        if len(signatures) <= 1:
+            continue
+        for item in instances:
+            implementation = item.get("implementation") if isinstance(item.get("implementation"), dict) else {}
+            if implementation.get("configurationMode") == "static_default":
+                add(
+                    report,
+                    "errors",
+                    "reusable_instance_configuration_missing",
+                    f"复用组件 {component.get('componentType')} 的实例 {item.get('instanceId')} 与其他实例语义不同，却仍使用 static_default",
+                    path,
+                )
+
+    return visual_instances
+
+
 def validate_layout(
     report: dict[str, Any],
     path: Path,
@@ -483,10 +603,12 @@ def validate_fgui_spec(
     text: str,
     components: list[dict[str, Any]],
     state_groups: list[dict[str, Any]],
-) -> tuple[list[dict[str, str]], list[dict[str, str]], dict[str, str]]:
+    visual_instances: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]], dict[str, str], list[dict[str, str]]]:
     controller_headers, controller_rows = parse_markdown_table(text, "Controllers")
     gear_headers, gear_rows = parse_markdown_table(text, "Gear Mapping Table")
     component_headers, component_rows = parse_markdown_table(text, "Components")
+    instance_headers, instance_rows = parse_markdown_table(text, "Instance Configuration")
 
     required_controller_columns = {"component", "controller", "pages", "default", "used by", "requirement ids", "state owner"}
     missing_controller_columns = sorted(required_controller_columns.difference(controller_headers))
@@ -497,6 +619,36 @@ def validate_fgui_spec(
     missing_gear_columns = sorted(required_gear_columns.difference(gear_headers))
     if missing_gear_columns:
         add(report, "errors", "fgui_gear_columns_missing", f"fgui_spec Gear Mapping Table 缺少列: {missing_gear_columns}", path)
+
+    if visual_instances:
+        required_instance_columns = {
+            "instance id", "xml name", "component type", "component file", "configuration mode",
+            "controller pages", "extension parameters", "preview values", "runtime bindings", "requirement ids",
+        }
+        missing_instance_columns = sorted(required_instance_columns.difference(instance_headers))
+        if missing_instance_columns:
+            add(report, "errors", "fgui_instance_configuration_columns_missing", f"fgui_spec Instance Configuration 缺少列: {missing_instance_columns}", path)
+        instance_index = {normalized(row.get("instance id")): row for row in instance_rows if row.get("instance id")}
+        for instance in visual_instances:
+            instance_id = str(instance.get("instanceId", ""))
+            row = instance_index.get(normalized(instance_id))
+            if row is None:
+                add(report, "errors", "fgui_instance_configuration_missing", f"实例 {instance_id} 未写入 fgui_spec Instance Configuration", path)
+                continue
+            implementation = instance.get("implementation") if isinstance(instance.get("implementation"), dict) else {}
+            expected_pairs = {
+                "xml name": instance.get("xmlInstanceName"),
+                "component type": instance.get("componentType"),
+                "component file": implementation.get("componentFile"),
+                "configuration mode": implementation.get("configurationMode"),
+            }
+            for column, expected in expected_pairs.items():
+                if expected and normalized(row.get(column)) != normalized(expected):
+                    add(report, "errors", "fgui_instance_configuration_mismatch", f"实例 {instance_id} 的 {column} 与 component_state_map 不一致: spec={row.get(column)}, semantic={expected}", path)
+            semantic_requirement_ids = {normalized(item) for item in split_values(instance.get("requirementIds"))}
+            row_requirement_ids = {normalized(item) for item in split_values(row.get("requirement ids"))}
+            if semantic_requirement_ids and not semantic_requirement_ids.intersection(row_requirement_ids):
+                add(report, "errors", "fgui_instance_requirement_ids_mismatch", f"实例 {instance_id} 的 Requirement IDs 与 component_state_map 不一致", path)
 
     files_by_component: dict[str, str] = {}
     for row in component_rows:
@@ -611,7 +763,7 @@ def validate_fgui_spec(
             if not matched:
                 add(report, "errors", "fgui_gear_mapping_missing", f"stateGroups[{group_index}] 的 {component.get('componentType')}.{controller}.{page}.{gear} 未写入 Gear Mapping Table", path)
 
-    return controller_rows, gear_rows, files_by_component
+    return controller_rows, gear_rows, files_by_component, instance_rows
 
 
 def find_component_file(files_by_component: dict[str, str], component: dict[str, Any]) -> str | None:
@@ -626,6 +778,113 @@ def xml_local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def selected_controller_page(controller: ET.Element) -> str | None:
+    tokens = split_values(controller.attrib.get("pages"))
+    if not tokens:
+        return None
+    if len(tokens) % 2 == 0 and all(str(tokens[index]).isdigit() for index in range(0, len(tokens), 2)):
+        page_names = tokens[1::2]
+    else:
+        page_names = tokens
+    try:
+        selected = int(controller.attrib.get("selected", "0"))
+    except ValueError:
+        return None
+    return page_names[selected] if 0 <= selected < len(page_names) else None
+
+
+def validate_visual_instance_xml(
+    report: dict[str, Any],
+    xml_dir: Path,
+    visual_instances: list[dict[str, Any]],
+) -> None:
+    if not visual_instances:
+        return
+
+    instances_by_name: dict[str, list[tuple[Path, ET.Element]]] = {}
+    for xml_path in sorted(xml_dir.rglob("*.xml")):
+        if xml_path.name == "package.xml":
+            continue
+        try:
+            root = ET.fromstring(read_text(xml_path))
+        except (OSError, ET.ParseError):
+            continue
+        for element in root.iter():
+            if xml_local_name(element.tag) != "component" or not element.attrib.get("src") or not element.attrib.get("name"):
+                continue
+            instances_by_name.setdefault(normalized(element.attrib["name"]), []).append((xml_path, element))
+
+    for instance in visual_instances:
+        instance_id = str(instance.get("instanceId", ""))
+        xml_name = str(instance.get("xmlInstanceName", ""))
+        implementation = instance.get("implementation") if isinstance(instance.get("implementation"), dict) else {}
+        mode = implementation.get("configurationMode")
+        expected_file = implementation.get("componentFile")
+        matches = instances_by_name.get(normalized(xml_name), [])
+        if len(matches) != 1:
+            add(report, "errors", "xml_visual_instance_unresolved", f"实例 {instance_id} 应在父 XML 中精确出现一次，实际 {len(matches)} 次: name={xml_name}", xml_dir)
+            continue
+
+        parent_xml, element = matches[0]
+        actual_file = element.attrib.get("fileName", "")
+        if expected_file and normalized(actual_file) != normalized(expected_file):
+            add(report, "errors", "xml_visual_instance_component_file_mismatch", f"实例 {instance_id} 使用了错误组件文件: XML={actual_file}, expected={expected_file}", parent_xml)
+            continue
+
+        target_path = xml_dir / actual_file
+        if not target_path.is_file():
+            add(report, "errors", "xml_visual_instance_component_file_missing", f"实例 {instance_id} 的组件文件不存在: {actual_file}", target_path)
+            continue
+        try:
+            target_root = ET.fromstring(read_text(target_path))
+        except (OSError, ET.ParseError) as exc:
+            add(report, "errors", "xml_visual_instance_component_invalid", f"实例 {instance_id} 的组件文件无法解析: {exc}", target_path)
+            continue
+
+        desired_pages = instance.get("controllerPages")
+        if isinstance(desired_pages, dict):
+            controllers = {
+                normalized(child.attrib.get("name")): child
+                for child in target_root.iter()
+                if xml_local_name(child.tag) == "controller" and child.attrib.get("name")
+            }
+            if mode == "controller_pages":
+                encoded = element.attrib.get("controller", "")
+                for controller_name, page_name in desired_pages.items():
+                    if normalized(controller_name) not in normalized(encoded) or normalized(page_name) not in normalized(encoded):
+                        add(report, "errors", "xml_instance_controller_encoding_missing", f"实例 {instance_id} 未包含经过验证的 Controller 页面编码: {controller_name}={page_name}", parent_xml)
+            else:
+                for controller_name, page_name in desired_pages.items():
+                    controller = controllers.get(normalized(controller_name))
+                    if controller is None:
+                        add(report, "errors", "xml_variant_controller_missing", f"实例 {instance_id} 的变体组件缺少 Controller {controller_name}", target_path)
+                        continue
+                    selected_page = selected_controller_page(controller)
+                    if normalized(selected_page) != normalized(page_name):
+                        add(report, "errors", "xml_variant_controller_default_mismatch", f"实例 {instance_id} 的 {controller_name} 默认页不匹配: XML={selected_page}, expected={page_name}", target_path)
+
+        extension_parameters = implementation.get("extensionParameters")
+        if isinstance(extension_parameters, dict):
+            for extension_name, parameters in extension_parameters.items():
+                extension_node = next((child for child in list(element) if xml_local_name(child.tag) == extension_name), None)
+                if extension_node is None:
+                    add(report, "errors", "xml_instance_extension_override_missing", f"实例 {instance_id} 缺少外部 <{extension_name}> 参数节点", parent_xml)
+                    continue
+                if isinstance(parameters, dict):
+                    for attribute, expected_value in parameters.items():
+                        if str(extension_node.attrib.get(attribute, "")) != str(expected_value):
+                            add(report, "errors", "xml_instance_extension_override_mismatch", f"实例 {instance_id} 的 {extension_name}@{attribute} 不匹配: XML={extension_node.attrib.get(attribute)}, expected={expected_value}", parent_xml)
+
+        preview_values = implementation.get("previewValues")
+        if isinstance(preview_values, dict) and preview_values:
+            for text_node in target_root.iter():
+                if xml_local_name(text_node.tag) not in {"text", "richtext"}:
+                    continue
+                visible_text = text_node.attrib.get("text", "")
+                if visible_text.startswith("@"):
+                    add(report, "errors", "xml_preview_raw_localization_key", f"实例 {instance_id} 的编辑器预览仍显示原始本地化 Key: {visible_text}", target_path)
+
+
 def validate_xml(
     report: dict[str, Any],
     xml_dir: Path,
@@ -634,6 +893,7 @@ def validate_xml(
     controller_rows: list[dict[str, str]],
     gear_rows: list[dict[str, str]],
     files_by_component: dict[str, str],
+    visual_instances: list[dict[str, Any]],
 ) -> None:
     if not xml_dir.is_dir():
         add(report, "errors", "xml_dir_missing", "指定的 XML 目录不存在", xml_dir)
@@ -702,6 +962,8 @@ def validate_xml(
             if not matching_gears:
                 add(report, "errors", "xml_gear_missing", f"对象 {target_name} 缺少计划中的 {gear_type}", xml_path)
 
+    validate_visual_instance_xml(report, xml_dir, visual_instances)
+
 
 def write_markdown(path: Path, report: dict[str, Any]) -> None:
     lines = ["# Semantic Controller Mapping Report", "", f"- result: {'PASS' if report['ok'] else 'BLOCKED'}", f"- stage: {report['stage']}", ""]
@@ -740,7 +1002,14 @@ def validate(root: Path, stage: str, xml_dir: Path | None = None) -> dict[str, A
         "xmlDir": str(xml_dir.resolve()) if xml_dir else None,
         "errors": [],
         "warnings": [],
-        "summary": {"components": 0, "stateGroups": 0, "controllers": 0, "gearMappings": 0},
+        "summary": {
+            "components": 0,
+            "stateGroups": 0,
+            "visualInstances": 0,
+            "controllers": 0,
+            "gearMappings": 0,
+            "instanceConfigurations": 0,
+        },
     }
 
     if not require_file(report, ui_spec_path, "ui_spec_missing", "ui_spec.md"):
@@ -759,8 +1028,10 @@ def validate(root: Path, stage: str, xml_dir: Path | None = None) -> dict[str, A
     semantic_text = read_text(semantic_spec_path)
     validate_semantic_sources(report, root, state_map_path, semantic_spec_path, state_map, semantic_text)
     components, state_groups, component_index, _ = validate_semantic_map(report, state_map_path, state_map)
+    visual_instances = validate_visual_instances(report, state_map_path, state_map, component_index)
     report["summary"]["components"] = len(components)
     report["summary"]["stateGroups"] = len(state_groups)
+    report["summary"]["visualInstances"] = len(visual_instances)
     validate_ui_state_matrix(report, ui_spec_path, component_index)
 
     if stage in {"layout_analysis", "fairygui_assembly", "xml_generation"}:
@@ -775,19 +1046,30 @@ def validate(root: Path, stage: str, xml_dir: Path | None = None) -> dict[str, A
     controller_rows: list[dict[str, str]] = []
     gear_rows: list[dict[str, str]] = []
     files_by_component: dict[str, str] = {}
+    instance_rows: list[dict[str, str]] = []
     if stage in {"fairygui_assembly", "xml_generation"}:
         if require_file(report, fgui_spec_path, "fgui_spec_missing", "fgui_spec.md"):
             fgui_text = read_text(fgui_spec_path)
-            controller_rows, gear_rows, files_by_component = validate_fgui_spec(
-                report, fgui_spec_path, fgui_text, components, state_groups
+            controller_rows, gear_rows, files_by_component, instance_rows = validate_fgui_spec(
+                report, fgui_spec_path, fgui_text, components, state_groups, visual_instances
             )
             report["summary"]["controllers"] = len(controller_rows)
             report["summary"]["gearMappings"] = len(gear_rows)
+            report["summary"]["instanceConfigurations"] = len(instance_rows)
 
     if xml_dir is not None:
         if stage != "xml_generation":
             add(report, "warnings", "xml_check_outside_xml_stage", "提供了 --xml-dir，但当前 stage 不是 xml_generation", xml_dir)
-        validate_xml(report, xml_dir.resolve(), components, state_groups, controller_rows, gear_rows, files_by_component)
+        validate_xml(
+            report,
+            xml_dir.resolve(),
+            components,
+            state_groups,
+            controller_rows,
+            gear_rows,
+            files_by_component,
+            visual_instances,
+        )
 
     report["ok"] = not report["errors"]
     return report

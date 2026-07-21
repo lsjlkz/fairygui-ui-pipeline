@@ -11,6 +11,7 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
@@ -82,6 +83,7 @@ def validate_manifest(manifest: dict[str, Any], report: dict[str, Any]) -> None:
         requires_visual_reference = production.get("requiresVisualReference") is True
         if generate_full_screen_design:
             expect(requires_design_approval, report, "full-screen design generation must require explicit design approval", "production.requiresDesignApproval")
+            expect(production.get("requiresVisualPartCoverage") is True, report, "full-screen design generation must require visual-part coverage", "production.requiresVisualPartCoverage")
         if generate_visual_assets:
             expect(requires_visual_reference, report, "visual asset generation must require a visual reference", "production.requiresVisualReference")
 
@@ -495,6 +497,22 @@ def main() -> int:
                         report,
                         "warnings",
                         "design approval: " + item.get("message", "warning"),
+                        item.get("path", str(project_root)),
+                    )
+
+                visual_part_report = validate_visual_part_coverage(project_root, "asset_planning")
+                for item in visual_part_report.get("errors", []):
+                    add(
+                        report,
+                        "errors",
+                        "visual part coverage: " + item.get("message", "invalid"),
+                        item.get("path", str(project_root)),
+                    )
+                for item in visual_part_report.get("warnings", []):
+                    add(
+                        report,
+                        "warnings",
+                        "visual part coverage: " + item.get("message", "warning"),
                         item.get("path", str(project_root)),
                     )
 

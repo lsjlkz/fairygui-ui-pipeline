@@ -136,6 +136,10 @@ Rules:
 - If two visible objects are the same component in different states, map them to the same `componentType` with different `instanceId` and `stateVariant`.
 - Record whether business state is owned by GamePlay/Config, visual state by FairyGUI Controller/Gear, and continuous runtime data by GameUI.
 - Use `references/semantic-controller-mapping-contract.md` to decide which objects require Controllers, which visual properties require Gears, and which values must stay runtime-bound.
+- Use `references/component-instance-configuration-contract.md` to define every reusable visual instance's `xmlInstanceName`, `controllerPages`, implementation mode, component file, preview values, and runtime bindings.
+- Use `references/visual-part-coverage-contract.md` to create `component_visual_parts.json` from the approved design. Record every required visible icon, frame, title decoration, background, separator, marker, loader, and text part with a project-defined role and explicit implementation.
+- Reusable instances that differ in role, selected state, title, icon, or preview data must not all use one unconfigured default component.
+- A required visible part may not disappear merely because it is non-interactive or visually small.
 - Run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage semantic_analysis` before layout work.
 - Record visible design elements that are not supported by requirements and requirements that are not visible in the design.
 
@@ -249,7 +253,10 @@ It must include:
 - requirement IDs and state-owner columns in Controller and Gear tables
 - transition table
 - relation/adaptation rules
+- mandatory Instance Configuration table covering every `component_state_map.visualInstances` entry
+- mandatory Visual Part Coverage table covering every `component_visual_parts.json` entry
 - external component parameter table for Button/Label instance title, icon, selected-state, and localization overrides
+- readable editor-preview values and localization-key storage strategy
 - text/localization rules
 - Unity binding fields
 - automation risk notes
@@ -300,6 +307,9 @@ Rules:
 - Generate in dependency order: `package.xml`, leaf components, composite components, main panel.
 - Register every referenced component/image in `package.xml`.
 - For external `<Button .../>` and `<Label .../>` instance parameters, require the target component `extention` to match, validate allowed fields, and resolve all `ui://` values.
+- For each visual instance, materialize the declared implementation mode. `variant_component` must point to a registered XML whose default Controller pages match `controllerPages`; `controller_pages` requires editor-verified encoding; `runtime_binding` requires readable preview fallback; `static_default` is allowed only for intentionally identical instances.
+- For each required visual part, materialize the declared Manifest asset or XML node. Detailed Graph fallbacks require explicit human approval.
+- Do not leave visible `@ui_...` keys in approved-design editor previews unless a verified editor localization plugin resolves them. Store the localization key separately, such as in `customData`.
 - Generate `package.xml path + name` from `packageRelativeFile`, never from the UIProduction-root-relative `file` field.
 - Generate same-package image `fileName` as the exact `packageRelativeFile`.
 - Use resource IDs in `src`; do not use file names as `src`.
@@ -323,7 +333,10 @@ Also manually inspect:
 - missing resource warnings
 - controller/page names
 - relation behavior at target resolutions
-- text fields and localization keys
+- text fields, readable preview text, and localization keys
+- repeated component instances use the intended portraits, icons, titles, states, and default Controller pages
+- all required visual parts from `component_visual_parts.json` are visible, including small icons and non-interactive framing/decorative elements
+- no white placeholder blocks, blank buttons, raw localization keys, duplicated default content, or silently omitted frames/titles/icons remain
 - list default item URLs
 
 ## Stage 15: Editor Publish
@@ -333,6 +346,9 @@ FairyGUI editor publish remains the official final output step.
 Generated XML is considered a draft until:
 
 - editor opens the package
+- a preview screenshot is captured at the design resolution and compared with the approved design
+- repeated semantic instances are visibly distinct as specified
+- no raw localization keys, blank controls, white placeholder blocks, or unintended default-component duplicates remain
 - visual layout is checked
 - package is published
 - Unity can load the published package

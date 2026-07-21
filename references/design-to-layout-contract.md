@@ -8,7 +8,7 @@ Do not generate FairyGUI XML directly from a design image.
 
 When the design was generated from requirements or design documents, first run `scripts/check_design_approval.py --stage layout_analysis`. A draft, pending, rejected, superseded, modified, or AI-self-approved image is not a valid layout source.
 
-Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md` and `references/semantic-controller-mapping-contract.md` first and use `component_state_map.json` as the semantic source of truth.
+Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md` and `references/semantic-controller-mapping-contract.md` first and use `component_state_map.json` as the semantic source of truth. Also read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json` before asset planning, so small icons, frames, title decorations, backgrounds, separators, and markers cannot disappear between layout analysis and XML.
 
 Keep this contract generic. It defines required files, fields, gates, and review rules. It must not contain project-specific screen names, concrete coordinates, asset file names, package IDs, resource IDs, or component instance IDs. Store those in the active project's `UIProduction` directory.
 
@@ -19,6 +19,7 @@ requirement document + approved design image + design_approval.json
 -> approval gate
 -> uxui_semantic_spec.md
 -> component_state_map.json
+-> component_visual_parts.json
 -> layout_spec.json
 -> layout overlay preview
 -> user or visual QA confirmation
@@ -38,6 +39,7 @@ For project-specific work, store these beside the project's UI production specs,
 - `design_approval.json`: exact approved image, SHA-256, human confirmation, and approved downstream scope.
 - `uxui_semantic_spec.md`: purpose, requirement links, component reuse, states, runtime ownership.
 - `component_state_map.json`: machine-readable mapping from visible instances to reusable component types and state variants.
+- `component_visual_parts.json`: machine-readable inventory of every required visible part, implementation mode, Manifest asset or XML node, file scope, complexity, and fallback policy.
 - `layout_spec.json`: canvas, regions, objects, slots, coordinate source, confidence, and review status.
 - `slice_plan.json`: exact crop candidates, extraction method, output names, and whether a crop is automatic, cleanup-required, or forbidden.
 - `layout_overlay_preview.png`: visual overlay of regions and object boxes on the design image.
@@ -157,12 +159,14 @@ Main panel XML cannot be generated from a design image unless all are available 
 - the approved image file exists and its SHA-256 still matches
 - `uxui_semantic_spec.md`
 - `component_state_map.json`
+- `component_visual_parts.json`
 - `layout_spec.json`
 - `slice_plan.json`
 - `asset_manifest.json` with `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap
 - `fgui_id_registry.json`
 - `fgui_spec.md`
 - a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
+- a passing `scripts/validate_visual_part_coverage.py --stage xml_generation` report
 - full FairyGUI XML parsing specification
 - either `layout_overlay_preview.png` reviewed, or a written risk acceptance that overlay review was skipped
 
@@ -180,6 +184,8 @@ When reviewing a design-to-layout pass, report:
 - mismatches between the approved design file and `layout_spec.json.sourceImages`
 - changed design bytes whose SHA-256 no longer matches approval
 - image objects whose `assetName` is missing or unresolved
+- required visual parts missing from Manifest, `fgui_spec.md`, or component XML
+- detailed visual parts silently downgraded to Graph without human approval
 - mismatches between Manifest `displaySize` and layout `bbox` size
 - mismatches between `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, and existing XML
 - requirement-defined states missing from semantic components or Controller pages

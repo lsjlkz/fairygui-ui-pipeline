@@ -245,7 +245,28 @@ Record after explicit confirmation of the exact file:
       "requirementIds": ["REQ-EQUIPMENT-STATE"]
     }
   ],
-  "visualInstances": [],
+  "visualInstances": [
+    {
+      "instanceId": "equipment_slot_left_01",
+      "componentType": "EquipmentSlot",
+      "xmlInstanceName": "equipment_slot_left",
+      "stateVariant": "ready",
+      "controllerPages": {
+        "state": "ready"
+      },
+      "slotRole": "cook_source",
+      "requirementIds": ["REQ-EQUIPMENT-STATE"],
+      "implementation": {
+        "configurationMode": "variant_component",
+        "componentFile": "equipment_slot_ready.xml",
+        "previewValues": {
+          "title": "READY",
+          "food": "preview_food"
+        },
+        "runtimeBindings": ["foodId", "cookProgress", "state"]
+      }
+    }
+  ],
   "stateGroups": [
     {
       "componentType": "EquipmentSlot",
@@ -261,6 +282,44 @@ Record after explicit confirmation of the exact file:
   "requirementLinks": [],
   "reviewStatus": "reviewed",
   "blockingForLayout": false,
+  "blockingForXml": false
+}
+```
+
+## component_visual_parts.json
+
+```json
+{
+  "version": "0.1.0",
+  "screen": "screen_name",
+  "designSources": ["generated/design/screen_design_final.png"],
+  "components": [
+    {
+      "componentType": "ExampleCard",
+      "componentFiles": ["example_card.xml"],
+      "requirementIds": ["REQ-EXAMPLE"],
+      "parts": [
+        {
+          "partId": "frame",
+          "role": "background_frame",
+          "required": true,
+          "visibleInApprovedDesign": true,
+          "visualImportance": "structural",
+          "complexity": "detailed",
+          "requirementIds": ["REQ-EXAMPLE"],
+          "implementation": {
+            "mode": "asset_image",
+            "assetName": "frame_example_card",
+            "xmlNodeNames": ["frame"],
+            "appliesToFiles": ["example_card.xml"],
+            "nodeMatch": "all",
+            "fallbackPolicy": "forbidden"
+          }
+        }
+      ]
+    }
+  ],
+  "reviewStatus": "reviewed",
   "blockingForXml": false
 }
 ```
@@ -331,6 +390,7 @@ Record after explicit confirmation of the exact file:
   "production": {
     "generateFullScreenDesign": true,
     "requiresDesignApproval": true,
+    "requiresVisualPartCoverage": true,
     "generateVisualAssets": true,
     "requiresVisualReference": true
   },
@@ -434,12 +494,24 @@ Cell list:
 | Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
 |---|---|---|---|---|---|---|
 
+## Visual Part Coverage
+
+| Component Type | Part ID | Role | Required | Importance | Complexity | Implementation Mode | Asset Name | XML Nodes | Applies To Files | Fallback Policy | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+
 ## Transitions
 
 | Component | Transition | Trigger | Draft Behavior | Needs Editor Review |
 |---|---|---|---|---|
 
 ## Relations
+
+## Instance Configuration
+
+Use this table for every `component_state_map.visualInstances` entry. Different reusable instances must declare how their Controller pages, titles, icons, preview values, and runtime bindings are materialized.
+
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|
 
 ## External Component Parameters
 
@@ -470,10 +542,46 @@ Use this table whenever a parent component instance contains an external `<Butto
   "summary": {
     "components": 4,
     "stateGroups": 12,
+    "visualInstances": 8,
     "controllers": 4,
-    "gearMappings": 18
+    "gearMappings": 18,
+    "instanceConfigurations": 8
   }
 }
+```
+
+## visual_part_coverage_report.json
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-01-01T00:00:00Z",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "xmlDir": "UIProduction/fgui_xml/package_name",
+  "errors": [],
+  "warnings": [],
+  "summary": {
+    "components": 4,
+    "parts": 24,
+    "requiredParts": 20
+  }
+}
+```
+
+## visual_part_coverage_report.md
+
+```md
+# Visual Part Coverage Report
+
+- result: PASS
+- stage: xml_generation
+
+## Errors
+- none
+
+## Warnings
+- none
 ```
 
 ## semantic_controller_mapping_report.md
@@ -525,6 +633,7 @@ Use this table whenever a parent component instance contains an external `<Butto
   "resourceGeneration": true,
   "embeddedDocsIntegrity": true,
   "semanticControllerMapping": true,
+  "visualPartCoverage": true,
   "designApproved": true,
   "packageName": "cooking",
   "packageId": "qdf53qpk",
@@ -572,6 +681,8 @@ Use this table whenever a parent component instance contains an external `<Butto
   "package_resource_paths_checked": true,
   "component_extension_overrides_checked": true,
   "semantic_controller_mapping_checked": true,
+  "component_instance_configurations_checked": true,
+  "visual_part_coverage_checked": true,
   "error_count": 0,
   "warning_count": 0,
   "issues": []

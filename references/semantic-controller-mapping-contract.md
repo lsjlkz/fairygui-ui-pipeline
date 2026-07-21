@@ -132,6 +132,21 @@ Every component must contain:
 - `reusable`
 - `requirementIds`
 
+Every visual instance must follow `references/component-instance-configuration-contract.md` and contain:
+
+- `instanceId`
+- `componentType`
+- `xmlInstanceName`
+- `stateVariant`
+- `controllerPages` when discrete Controller state participates
+- `implementation.configurationMode`
+- `implementation.componentFile`
+- `implementation.previewValues`
+- `implementation.runtimeBindings`
+- `requirementIds`
+
+A reusable component may have a correct Controller/Gear implementation while every parent instance still displays the same default page. Therefore, semantically different reusable instances must use an explicit variant component, supported extension override, editor-verified Controller-page encoding, or runtime binding with a readable preview fallback. `static_default` is forbidden when instance signatures differ.
+
 Every state group must contain:
 
 - `componentType`
@@ -198,6 +213,11 @@ The following tables are mandatory for stateful screens.
 | Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
 |---|---|---|---|---|---|---|
 
+### Instance Configuration
+
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|
+
 Rules:
 
 - every semantic controller must exist in the Controllers table
@@ -206,6 +226,9 @@ Rules:
 - every gear mapping controller/page must resolve to the Controllers table
 - every semantic `stateGroup.gearType` must have a corresponding Gear Mapping row
 - components with runtime-only state must explicitly say `Controller=none` and identify their runtime binding owner
+- every `visualInstances` entry must appear exactly once in Instance Configuration
+- the instance component file and configuration mode must match `component_state_map.json`
+- readable preview values are required when runtime code or localization normally fills content
 
 ## XML Requirements
 
@@ -213,6 +236,10 @@ When XML exists:
 
 - every planned controller must appear in the owning component XML
 - every planned gear type must appear on the expected target object
+- every semantic visual instance must resolve to exactly one parent XML component instance by `xmlInstanceName`
+- `variant_component` files must have default selected Controller pages matching the declared instance `controllerPages`
+- extension override nodes must match the declared per-instance parameters
+- approved-design preview components must not display raw localization keys as visible text
 - every gear controller reference must resolve to a controller in the same component
 - gear pages must belong to the referenced controller
 - missing controller/gear implementation is a hard error in `fresh` mode
@@ -235,6 +262,9 @@ Before XML generation, block when:
 
 - `scripts/validate_semantic_controller_mapping.py` fails
 - XML Controller/Gear implementation disagrees with the semantic and assembly specifications
+- semantically different reusable instances all use an unconfigured default component
+- any instance component file, default Controller page, external parameter, preview value, or runtime-binding declaration is missing or inconsistent
+- the FairyGUI preview still contains raw localization keys, blank controls, white placeholders, or unintended duplicated default content
 
 ## Required Validator
 
