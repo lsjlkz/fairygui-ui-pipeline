@@ -486,6 +486,7 @@ def validate_visual_instances(
         runtime_bindings = implementation.get("runtimeBindings")
         controller_pages = instance.get("controllerPages")
         extension_parameters = implementation.get("extensionParameters")
+        controller_parameters = implementation.get("controllerParameters")
 
         if mode not in INSTANCE_CONFIGURATION_MODES:
             add(report, "errors", "visual_instance_configuration_mode_invalid", f"实例 {instance_id} 的 configurationMode 非法: {mode}", path)
@@ -504,6 +505,14 @@ def validate_visual_instances(
         elif mode == "controller_pages":
             if not isinstance(controller_pages, dict) or not controller_pages:
                 add(report, "errors", "controller_pages_missing", f"实例 {instance_id} 使用 controller_pages 但未声明 controllerPages", path)
+            if not isinstance(controller_parameters, dict) or not controller_parameters:
+                add(report, "errors", "controller_parameters_missing", f"实例 {instance_id} 使用 controller_pages 但未声明 implementation.controllerParameters", path)
+            elif isinstance(controller_pages, dict):
+                for controller_name, page_name in controller_parameters.items():
+                    if controller_name not in controller_pages:
+                        add(report, "errors", "controller_parameter_not_in_pages", f"实例 {instance_id} 外部传入 Controller {controller_name}，但 controllerPages 中没有该项", path)
+                    elif normalized(controller_pages.get(controller_name)) != normalized(page_name):
+                        add(report, "errors", "controller_parameter_page_mismatch", f"实例 {instance_id} 的 controllerParameters.{controller_name} 与 controllerPages 不一致", path)
         elif mode == "runtime_binding":
             if not isinstance(runtime_bindings, list) or not runtime_bindings:
                 add(report, "errors", "runtime_binding_fields_missing", f"实例 {instance_id} 使用 runtime_binding 但 runtimeBindings 为空", path)
@@ -610,7 +619,7 @@ def validate_fgui_spec(
     component_headers, component_rows = parse_markdown_table(text, "Components")
     instance_headers, instance_rows = parse_markdown_table(text, "Instance Configuration")
 
-    required_controller_columns = {"component", "controller", "pages", "default", "used by", "requirement ids", "state owner"}
+    required_controller_columns = {"component", "controller", "pages", "default", "exported", "used by", "requirement ids", "state owner"}
     missing_controller_columns = sorted(required_controller_columns.difference(controller_headers))
     if missing_controller_columns:
         add(report, "errors", "fgui_controller_columns_missing", f"fgui_spec Controllers 缺少列: {missing_controller_columns}", path)
@@ -623,7 +632,7 @@ def validate_fgui_spec(
     if visual_instances:
         required_instance_columns = {
             "instance id", "xml name", "component type", "component file", "configuration mode",
-            "controller pages", "extension parameters", "preview values", "runtime bindings", "requirement ids",
+            "controller pages", "controller parameters", "extension parameters", "preview values", "runtime bindings", "requirement ids",
         }
         missing_instance_columns = sorted(required_instance_columns.difference(instance_headers))
         if missing_instance_columns:
@@ -645,6 +654,20 @@ def validate_fgui_spec(
             for column, expected in expected_pairs.items():
                 if expected and normalized(row.get(column)) != normalized(expected):
                     add(report, "errors", "fgui_instance_configuration_mismatch", f"实例 {instance_id} 的 {column} 与 component_state_map 不一致: spec={row.get(column)}, semantic={expected}", path)
+            semantic_controller_parameters = implementation.get("controllerParameters") if isinstance(implementation.get("controllerParameters"), dict) else {}
+            expected_controller_parameters = {
+                normalized(key): normalized(value)
+                for key, value in semantic_controller_parameters.items()
+            }
+            actual_controller_parameters: dict[str, str] = {}
+            for item in split_values(row.get("controller parameters")):
+                if "=" not in item:
+                    continue
+                key, value = item.split("=", 1)
+                actual_controller_parameters[normalized(key)] = normalized(value)
+            if expected_controller_parameters != actual_controller_parameters:
+                add(report, "errors", "fgui_instance_controller_parameters_mismatch", f"实例 {instance_id} 的 Controller Parameters 与 component_state_map 不一致", path)
+
             semantic_requirement_ids = {normalized(item) for item in split_values(instance.get("requirementIds"))}
             row_requirement_ids = {normalized(item) for item in split_values(row.get("requirement ids"))}
             if semantic_requirement_ids and not semantic_requirement_ids.intersection(row_requirement_ids):
@@ -675,6 +698,9 @@ def validate_fgui_spec(
             add(report, "errors", "fgui_controller_state_owner_invalid", f"Controllers 行 {index} 缺少合法 State Owner", path)
         if default and normalized(default) not in {normalized(page) for page in pages}:
             add(report, "errors", "fgui_controller_default_invalid", f"Controllers 行 {index} 的 Default={default} 不在 Pages 中", path)
+        exported = row.get("exported", "").strip().strip("`").lower()
+        if exported not in {"true", "false"}:
+            add(report, "errors", "fgui_controller_exported_invalid", f"Controllers 行 {index} 的 Exported 必须是 true/false", path)
 
     def find_controller_row(component: dict[str, Any], controller: str) -> dict[str, str] | None:
         for row in controller_rows:
@@ -713,6 +739,21 @@ def validate_fgui_spec(
             missing_pages = sorted(page for page in expected_pages if page and page not in actual_pages)
             if missing_pages:
                 add(report, "errors", "fgui_controller_pages_missing", f"组件 {component.get('componentType')} Controller {controller} 缺少语义状态页: {missing_pages}", path)
+
+    for instance in visual_instances:
+        implementation = instance.get("implementation") if isinstance(instance.get("implementation"), dict) else {}
+        if implementation.get("configurationMode") != "controller_pages":
+            continue
+        component = next((item for item in components if aliases_match(instance.get("componentType"), item)), None)
+        controller_parameters = implementation.get("controllerParameters")
+        if component is None or not isinstance(controller_parameters, dict):
+            continue
+        for controller_name in controller_parameters:
+            row = find_controller_row(component, controller_name)
+            if row is None:
+                continue
+            if row.get("exported", "").strip().strip("`").lower() != "true":
+                add(report, "errors", "fgui_controller_not_exported", f"实例 {instance.get('instanceId')} 通过父组件传入 Controller {controller_name}，Controllers 表必须标记 Exported=true", path)
 
     for index, row in enumerate(gear_rows):
         gear_type = row.get("gear type", "").strip().strip("`")
@@ -778,14 +819,27 @@ def xml_local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def selected_controller_page(controller: ET.Element) -> str | None:
+def controller_page_names(controller: ET.Element) -> list[str]:
     tokens = split_values(controller.attrib.get("pages"))
     if not tokens:
-        return None
+        return []
     if len(tokens) % 2 == 0 and all(str(tokens[index]).isdigit() for index in range(0, len(tokens), 2)):
-        page_names = tokens[1::2]
-    else:
-        page_names = tokens
+        return tokens[1::2]
+    return tokens
+
+
+def controller_page_index(controller: ET.Element, page_name: Any) -> int | None:
+    expected = normalized(page_name)
+    for index, name in enumerate(controller_page_names(controller)):
+        if normalized(name) == expected:
+            return index
+    return None
+
+
+def selected_controller_page(controller: ET.Element) -> str | None:
+    page_names = controller_page_names(controller)
+    if not page_names:
+        return None
     try:
         selected = int(controller.attrib.get("selected", "0"))
     except ValueError:
@@ -849,10 +903,27 @@ def validate_visual_instance_xml(
                 if xml_local_name(child.tag) == "controller" and child.attrib.get("name")
             }
             if mode == "controller_pages":
-                encoded = element.attrib.get("controller", "")
-                for controller_name, page_name in desired_pages.items():
-                    if normalized(controller_name) not in normalized(encoded) or normalized(page_name) not in normalized(encoded):
-                        add(report, "errors", "xml_instance_controller_encoding_missing", f"实例 {instance_id} 未包含经过验证的 Controller 页面编码: {controller_name}={page_name}", parent_xml)
+                controller_parameters = implementation.get("controllerParameters")
+                if not isinstance(controller_parameters, dict) or not controller_parameters:
+                    add(report, "errors", "xml_controller_parameters_missing", f"实例 {instance_id} 缺少 implementation.controllerParameters", parent_xml)
+                elif len(controller_parameters) > 1:
+                    add(report, "errors", "xml_multiple_controller_parameters_unverified", f"实例 {instance_id} 同时外传多个 Controller；当前仅接受经过编辑器验证的单 Controller 编码", parent_xml)
+                else:
+                    controller_name, page_name = next(iter(controller_parameters.items()))
+                    controller = controllers.get(normalized(controller_name))
+                    if controller is None:
+                        add(report, "errors", "xml_exported_controller_missing", f"实例 {instance_id} 的目标组件缺少 Controller {controller_name}", target_path)
+                    elif controller.attrib.get("exported", "").lower() != "true":
+                        add(report, "errors", "xml_controller_not_exported", f"实例 {instance_id} 需要外传 {controller_name}，但目标 Controller 未设置 exported=\"true\"", target_path)
+                    else:
+                        page_index = controller_page_index(controller, page_name)
+                        if page_index is None:
+                            add(report, "errors", "xml_exported_controller_page_missing", f"实例 {instance_id} 的 Controller {controller_name} 不存在页面 {page_name}", target_path)
+                        else:
+                            expected_encoding = f"{controller_name},{page_index}"
+                            actual_encoding = element.attrib.get("controller", "")
+                            if actual_encoding != expected_encoding:
+                                add(report, "errors", "xml_instance_controller_encoding_mismatch", f"实例 {instance_id} 的外部 Controller 编码错误: XML={actual_encoding}, expected={expected_encoding}", parent_xml)
             else:
                 for controller_name, page_name in desired_pages.items():
                     controller = controllers.get(normalized(controller_name))

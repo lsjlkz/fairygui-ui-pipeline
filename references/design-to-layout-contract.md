@@ -8,7 +8,7 @@ Do not generate FairyGUI XML directly from a design image.
 
 When the design was generated from requirements or design documents, first run `scripts/check_design_approval.py --stage layout_analysis`. A draft, pending, rejected, superseded, modified, or AI-self-approved image is not a valid layout source.
 
-Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md` and `references/semantic-controller-mapping-contract.md` first and use `component_state_map.json` as the semantic source of truth. Also read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json` before asset planning, so small icons, frames, title decorations, backgrounds, separators, and markers cannot disappear between layout analysis and XML.
+Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md`, `references/semantic-controller-mapping-contract.md`, and `references/component-reuse-parameterization-contract.md` first and use `component_state_map.json` as the semantic source of truth. Components with the same hierarchy must share a base component even when their titles, icons, portraits, values, colors, sizes, or default pages differ. Also read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json` before asset planning, so small icons, frames, title decorations, backgrounds, separators, and markers cannot disappear between layout analysis and XML.
 
 Keep this contract generic. It defines required files, fields, gates, and review rules. It must not contain project-specific screen names, concrete coordinates, asset file names, package IDs, resource IDs, or component instance IDs. Store those in the active project's `UIProduction` directory.
 
@@ -38,7 +38,7 @@ For project-specific work, store these beside the project's UI production specs,
 
 - `design_approval.json`: exact approved image, SHA-256, human confirmation, and approved downstream scope.
 - `uxui_semantic_spec.md`: purpose, requirement links, component reuse, states, runtime ownership.
-- `component_state_map.json`: machine-readable mapping from visible instances to reusable component types and state variants.
+- `component_state_map.json`: machine-readable mapping from visible instances to reusable component types, `reusePlan`, state variants, parameter fields, child components, and any justified structural variants.
 - `component_visual_parts.json`: machine-readable inventory of every required visible part, implementation mode, Manifest asset or XML node, file scope, complexity, and fallback policy.
 - `layout_spec.json`: canvas, regions, objects, slots, coordinate source, confidence, and review status.
 - `slice_plan.json`: exact crop candidates, extraction method, output names, and whether a crop is automatic, cleanup-required, or forbidden.
@@ -88,6 +88,8 @@ Object fields:
 - `binding`
 - `stateOwner`
 - `runtimeRole`
+- `zLayer`: `background`, `content`, `foreground`, `overlay`, `modal`, or `debug`
+- `occlusionPolicy`: `opaque_background`, `normal`, `transparent_frame`, `intentional_overlay`, `modal_blocker`, or `non_visual`
 - `requirementIds`
 - `slicePolicy`: `slice_static`, `use_component`, `use_manifest_asset`, `runtime_generated`, or `do_not_slice`
 - `assetName`: required for bitmap/image objects; must resolve to `asset_manifest.json.assets[].name`
@@ -107,6 +109,8 @@ Slot fields:
 - `binding`
 - `stateOwner`
 - `runtimeRole`
+- `zLayer`
+- `occlusionPolicy`
 - `requirementIds`
 
 ## Same Component / Different State Rule
@@ -127,7 +131,7 @@ Wrong:
 {"componentType":"BurgerPlate"}
 ```
 
-The first form can map to one FairyGUI component with controllers/gears. The second form incorrectly bakes state into component identity.
+The first form can map to one FairyGUI component with controllers/gears. The second form incorrectly bakes state into component identity. The same rule applies to title, icon, portrait, number, color, instance size, and localization differences: these are instance parameters, not component identities. When a fixed visual page differs by instance, prefer an exported Controller passed from the parent through `controller="name,pageIndex"`.
 
 ## slice_plan.json Requirements
 
@@ -166,6 +170,9 @@ Main panel XML cannot be generated from a design image unless all are available 
 - `fgui_id_registry.json`
 - `fgui_spec.md`
 - a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
+- a passing `scripts/validate_component_reuse.py --stage xml_generation` report
+- a passing `scripts/validate_display_list_z_order.py --stage xml_generation` report
+- a passing `scripts/validate_bitmap_asset_provenance.py --stage xml_generation` report
 - a passing `scripts/validate_visual_part_coverage.py --stage xml_generation` report
 - full FairyGUI XML parsing specification
 - either `layout_overlay_preview.png` reviewed, or a written risk acceptance that overlay review was skipped
@@ -178,6 +185,10 @@ When reviewing a design-to-layout pass, report:
 
 - visual instances whose semantic component/state is ambiguous
 - same-component/different-state cases that were split incorrectly
+- large backgrounds or opaque containers placed after normal content in XML order
+- foreground frames incorrectly classified as opaque backgrounds
+- components split only because title, icon, portrait, value, color, size, localization, or selected page differs
+- repeated substructures that should become parameterized child components
 - regions and slots with low confidence
 - objects marked `do_not_slice`
 - crops requiring cleanup

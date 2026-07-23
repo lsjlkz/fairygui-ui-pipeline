@@ -76,6 +76,12 @@ Rules:
   "nineSliceGrid": null,
   "transparent": true,
   "trim": true,
+  "assetSource": {
+    "mode": "approved_sheet_slice",
+    "sourceFile": "generated/sheets/sheet_food_5x4.png",
+    "crop": [0, 0, 256, 256],
+    "reviewStatus": "approved"
+  },
   "pivot": "center",
   "sheet": "sheet_food_5x4",
   "cell": [0, 0],
@@ -115,13 +121,21 @@ asset.file == package.outputPath + "/" + asset.packageRelativeFile
 
 `file` is relative to the `UIProduction` root. `packageRelativeFile` is relative to the directory containing `package.xml` and is the only path allowed in fresh component XML `fileName`. Do not write the full `asset.file` value into `package.xml` or component XML.
 
-When `production.generateFullScreenDesign=true`, both `production.requiresDesignApproval` and `production.requiresVisualPartCoverage` must be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, obtain a passing approval record, and create `specs/component_visual_parts.json` before finalizing the production manifest or entering downstream stages.
+When `production.generateFullScreenDesign=true`, both `production.requiresDesignApproval` and `production.requiresVisualPartCoverage` must be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, obtain a passing approval record, create `specs/component_visual_parts.json`, and complete reusable-component planning under `references/component-reuse-parameterization-contract.md` before finalizing the production manifest or entering downstream stages.
 
 ## Visual Part Coverage
 
 Every required visible part declared in `specs/component_visual_parts.json` must have an explicit implementation. Asset-backed parts must name an `assets[].name`; Graph fallbacks for detailed parts require explicit human approval; XML node names are validated after generation. Read `references/visual-part-coverage-contract.md`.
 
 When `production.generateVisualAssets=true`, at least one valid primary entry in `referenceImages` is mandatory. Read `references/visual-reference-contract.md` before image generation.
+
+## Bitmap Icon Provenance
+
+Every small art-directed icon asset must include `assetSource` according to `references/bitmap-icon-source-contract.md`.
+
+Allowed production sources are approved design/sheet slices, user-provided bitmaps, existing package bitmaps, or reference-driven image generation with an approval record. Programmatic Graph/SVG/font-glyph/PIL geometry is forbidden for production icons even when it is rasterized to PNG.
+
+Run `scripts/validate_bitmap_asset_provenance.py` before resource generation and XML readiness.
 
 Recommended pivot values:
 
@@ -162,6 +176,9 @@ Rules:
 - `title` and `selectedTitle` use localization keys for formal UI copy.
 - `icon`, `selectedIcon`, and `sound` use registered `ui://{packageId}{resourceId}` URLs.
 - Override nodes do not create new assets; every referenced icon or sound must already exist in the manifest/registry/package.
+- Every referenced icon must also have valid bitmap provenance; an external `icon` override may not point to a procedurally drawn replacement.
+- Every external override field must be declared in `component_state_map.components[].reusePlan.parameterizableFields`.
+- Do not create a new component XML merely because an instance needs a different external title or icon.
 - Unsupported extension attributes and mismatched child tags are blockers.
 
 ## fgui_id_registry.json
@@ -202,9 +219,8 @@ Use lowercase snake_case for files and asset names:
 - `bg_kitchen_main`
 - `table_workbench`
 - `food_patty_raw`
-- `machine_fryer_idle`
-- `machine_fryer_done`
-- `btn_start_normal`
+- `machine_fryer` for one reusable component with idle/done Controller pages
+- `btn_start` for one reusable Button component; state belongs to its Button Controller
 - `icon_coin`
 - `bubble_order_empty`
 - `customer_01_idle`

@@ -32,27 +32,33 @@ Do not use this `SKILL.md`, memory, a summary, a bridge file, or a short contrac
 - The AI must never approve its own mockup. It may create `design_approval.json` with `pending` or `rejected`, but may write `approved` only after the user explicitly confirms the exact design file or a valid human approval record is provided.
 - Read `references/asset-size-contract.md` before planning, slicing, registering, or placing bitmap resources. Unexplained differences between real pixels, manifest sizes, layout sizes, and XML sizes are errors.
 - Read `references/package-resource-path-contract.md` before staging package files or writing XML. Project-root-relative `asset.file` and package-local `packageRelativeFile` are different paths and must never be substituted for each other.
-- Read `references/component-instance-configuration-contract.md` whenever reusable components appear more than once. Component-level Controller/Gear definitions are insufficient unless every semantic instance has a verifiable default-page, variant, extension-override, or runtime-binding strategy.
+- Read `references/component-reuse-parameterization-contract.md` before selecting component files. Reusable components must prefer one base XML plus external parameters, Controller pages, runtime bindings, or reusable child components. Title, icon, portrait, number, color, size, localization, or selected-page differences alone must not create separate variant XML files.
+- Read `references/component-instance-configuration-contract.md` whenever reusable components appear more than once. Component-level Controller/Gear definitions are insufficient unless every semantic instance has a verifiable default-page, extension-override, exported Controller parameter, runtime-binding, or justified structural-variant strategy.
+- Read `references/display-list-z-order-contract.md` before layout assembly or XML generation. FairyGUI displayList is back-to-front: opaque backgrounds must be the earliest XML children; later full-size components may appear only as explicitly transparent frames or intentional overlays.
+- Read `references/bitmap-icon-source-contract.md` before producing small icons, badges, crests, or emblems. Production icons must use approved bitmap provenance; Graph/SVG/font-glyph/PIL geometry and other procedural vector-like substitutes are forbidden.
 - Read `references/visual-part-coverage-contract.md` for every approved complete-screen design. Every visible structural, semantic, or decorative part must be recorded in `component_visual_parts.json` and mapped to a manifest asset, FairyGUI node, text node, child component, or explicitly approved fallback.
+- Read `references/pipeline-stage-timing-contract.md` before an end-to-end run. Initialize timing before Stage 1, start and finish every canonical stage, preserve rework attempts, and output per-stage timing reports before declaring completion.
 - Treat `fgui_id_registry.json` as the source of stable package/resource/component IDs. Generate IDs only for new entries; preserve existing IDs on reruns.
 - Generate FairyGUI XML only as a draft unless the user has verified it opens in FairyGUI editor.
 - Keep image text out of bitmap assets by default. Use FairyGUI text fields and localization keys for real UI text.
-- Prefer structured project files: `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `component_visual_parts.json`, `layout_spec.json`, `slice_plan.json`, `asset_manifest.json`, `sheet_plan.md`, `fgui_spec.md`, XML drafts, validation reports, and import checklists.
+- Prefer structured project files: `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `component_visual_parts.json`, `layout_spec.json`, `slice_plan.json`, `asset_manifest.json`, `sheet_plan.md`, `fgui_spec.md`, `pipeline_stage_timings.json`, XML drafts, validation reports, and import checklists.
 
 ## Workflow Decision Tree
 
-1. If the user provides only an idea or gameplay notes, run the requirement sufficiency check and create `ui_spec.md`.
-2. When building a complete screen from requirements or design documents, create `visual_design_brief.md`, generate one or more full-screen mockups, create a pending `design_approval.json`, present the mockup for confirmation, and stop.
-3. Continue only after `scripts/check_design_approval.py` passes for the requested stage. The exact approved image becomes the visual source of truth for screen composition and layout.
-4. If the user provides an already confirmed design image, require a valid approval record before treating it as approved.
-5. After approval, read `references/uxui-semantic-contract.md` and `references/component-instance-configuration-contract.md`, then create `uxui_semantic_spec.md` plus `component_state_map.json`. Every reusable visible instance must declare `xmlInstanceName`, `controllerPages`, `implementation.configurationMode`, `componentFile`, readable `previewValues`, and runtime bindings before layout analysis.
-6. Read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json`, inventorying every required icon, frame, title decoration, background, separator, marker, text field, loader, and other visible part without relying on fixed business enums.
-7. After semantic/state and visual-part mapping exist, read `references/design-to-layout-contract.md` and create `layout_spec.json`, `slice_plan.json`, and a layout overlay preview or overlay-review risk report before any slicing or XML.
-8. Before production asset generation, verify the visual reference gate, approved full-screen design gate, and visual-part coverage gate; then create `asset_manifest.json`, `sheet_plan.md`, and imagegen prompts.
-9. If the user provides generated sheets or sliced assets, validate them against the manifest and produce a cut report or correction plan.
-10. If the user asks for FairyGUI assembly, create `fgui_spec.md` with semantic component mapping, layout region table, slot table, component ownership table, Controller table, Gear mapping table, mandatory Instance Configuration and Visual Part Coverage tables, transition/relation tables, component hierarchy, binding names, and an XML readiness report.
-11. If the user explicitly asks for XML or the current step is XML generation, enter XML Strict Mode. If any strict input is missing, output `XML生成阻塞报告` and do not emit XML.
-12. If the user asks for Unity connection, create binding names, loading notes, package publishing checklist, and smoke-test steps.
+1. For an end-to-end run, initialize `reports/pipeline_stage_timings.json` before requirement intake and start the `requirement_intake` stage.
+2. If the user provides only an idea or gameplay notes, run the requirement sufficiency check and create `ui_spec.md`.
+3. When building a complete screen from requirements or design documents, create `visual_design_brief.md`, generate one or more full-screen mockups, finish `design_mockup_generation`, start the waiting-category `design_approval` stage, create a pending `design_approval.json`, present the mockup for confirmation, write a timing snapshot, and stop.
+4. Continue only after `scripts/check_design_approval.py` passes for the requested stage. Finish the approval attempt with its real status. The exact approved image becomes the visual source of truth for screen composition and layout.
+5. If the user provides an already confirmed design image, require a valid approval record before treating it as approved.
+6. After approval, read `references/uxui-semantic-contract.md`, `references/component-reuse-parameterization-contract.md`, and `references/component-instance-configuration-contract.md`, then create `uxui_semantic_spec.md` plus `component_state_map.json`. Every reusable component must declare `reusePlan`; every reusable visible instance must declare `xmlInstanceName`, `controllerPages`, `implementation.configurationMode`, `componentFile`, readable `previewValues`, and runtime bindings. `controller_pages` instances must also declare `implementation.controllerParameters`.
+7. Read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json`, inventorying every required icon, frame, title decoration, background, separator, marker, text field, loader, and other visible part without relying on fixed business enums.
+8. After semantic/state and visual-part mapping exist, read `references/design-to-layout-contract.md` and create `layout_spec.json`, `slice_plan.json`, and a layout overlay preview or overlay-review risk report before any slicing or XML.
+9. Before production asset generation, verify the visual reference gate, approved full-screen design gate, visual-part coverage gate, and bitmap provenance plan; then create `asset_manifest.json`, `sheet_plan.md`, and imagegen prompts. Every icon asset must declare `assetSource`.
+10. If the user provides generated sheets or sliced assets, validate them against the manifest and produce a cut report or correction plan.
+11. If the user asks for FairyGUI assembly, create `fgui_spec.md` with semantic component mapping, layout region table, slot table, component ownership table, mandatory Component Reuse Plan, Controller table with `Exported`, Gear mapping table, Instance Configuration with Controller Parameters, Visual Part Coverage, back-to-front Display List columns `Z Layer`/`Occlusion Policy`, transition/relation tables, component hierarchy, binding names, and an XML readiness report.
+12. If the user explicitly asks for XML or the current step is XML generation, enter XML Strict Mode. If any strict input is missing, output `XML生成阻塞报告` and do not emit XML.
+13. If the user asks for Unity connection, create binding names, loading notes, package publishing checklist, and smoke-test steps.
+14. At the end, finalize and validate stage timing. A completed run requires all 16 canonical stages to be completed or explicitly skipped, and the final handoff must show every stage duration.
 
 ## Requirement Sufficiency Gate
 
@@ -111,23 +117,25 @@ A changed or regenerated image invalidates previous approval. Silence, inferred 
 
 ## Standard Pipeline
 
+0. Initialize timing with `scripts/record_pipeline_timing.py --root UIProduction init`; start and finish every canonical stage as work progresses.
 1. Create `ui_spec.md`: screen goal, player flow, region intent, component list, state matrix, art constraints, acceptance criteria.
 2. Create `visual_design_brief.md` from requirements, UI/UX documents, and reference images.
 3. Generate one or more complete-screen mockups under `generated/design/`.
 4. Create `design_approval.json` as pending and stop for explicit human confirmation.
 5. Run the approval gate; continue only when the exact design file is approved for the requested stage.
-6. Create `uxui_semantic_spec.md` and `component_state_map.json`: visible part inventory, requirement links, component reuse, state variants, runtime ownership, per-instance Controller pages, implementation mode, component file, preview values, runtime bindings, and mismatch report.
+6. Create `uxui_semantic_spec.md` and `component_state_map.json`: visible part inventory, requirement links, component reuse, `reusePlan`, state variants, runtime ownership, per-instance Controller pages, implementation mode, base component file, preview values, runtime bindings, justified structural variants, and mismatch report.
 7. Create `component_visual_parts.json`: per-component required visual parts, design evidence, importance, complexity, implementation mode, asset names, XML node names, file scope, and fallback policy.
 8. Create `layout_spec.json`, `slice_plan.json`, and `layout_overlay_preview.png` or an overlay-review risk report. Layout objects must reference semantic IDs and the approved design image.
 9. Create `asset_manifest.json`: production intent, reference images, resources, sheets, cells, source pixel sizes, display sizes, scale policies, states, pivots, naming, FairyGUI mapping, and every asset-backed required visual part.
 10. Create `sheet_plan.md`: sheet sizes, rows/columns, per-cell item list, imagegen prompt set, negative prompt constraints.
 11. Generate or request production image assets: background, standalone images, and transparent sheet images.
 12. Slice sheets according to the manifest: output named PNGs, preview contact sheet, and `cut_report.json`.
-13. Create FairyGUI assembly plan: package, components, display list, semantic component mapping, layout regions, slot grids, component ownership, Controllers, Gear mappings, Instance Configuration, Visual Part Coverage, transitions, relations, readable editor-preview text, and binding names.
+13. Create FairyGUI assembly plan: package, components, display list, semantic component mapping, layout regions, slot grids, component ownership, Component Reuse Plan, Controllers, Gear mappings, Instance Configuration, Visual Part Coverage, transitions, relations, readable editor-preview text, and binding names.
 14. Stage the complete package bundle under `package.outputPath`: XML destination plus every file at `packageRelativeFile`.
-15. Run XML Strict Mode readiness checks, including `validate_visual_part_coverage.py`.
+15. Run XML Strict Mode readiness checks, including `validate_semantic_controller_mapping.py`, `validate_component_reuse.py`, `validate_display_list_z_order.py`, `validate_bitmap_asset_provenance.py`, and `validate_visual_part_coverage.py`.
 16. Generate and validate XML drafts using stable IDs from `fgui_id_registry.json` only if all gates pass.
 17. Publish with FairyGUI editor and run Unity smoke tests.
+18. Finalize `reports/pipeline_stage_timings.json` / `.md`, validate the timing record, and include total plus per-stage durations in the final handoff.
 
 ## XML Strict Mode
 
@@ -149,7 +157,10 @@ Required inputs:
 - `references/uxui-semantic-contract.md` when the XML is based on requirements plus a design image
 - `references/design-to-layout-contract.md` when the XML is based on a design image or reference mockup
 - `references/semantic-controller-mapping-contract.md` when components have states, interactions, runtime data, Controllers, or Gears
+- `references/component-reuse-parameterization-contract.md` whenever components repeat or multiple candidate XML files share the same visual structure
 - `references/component-instance-configuration-contract.md` whenever reusable components have multiple instances, per-instance titles/icons, different Controller pages, or runtime-bound preview data
+- `references/display-list-z-order-contract.md` for every component hierarchy and XML displayList
+- `references/bitmap-icon-source-contract.md` for small icons, badges, crests, and emblems
 - `references/visual-part-coverage-contract.md` and `component_visual_parts.json` for every approved complete-screen design
 - `references/package-resource-path-contract.md` for all package-local file staging, `package.xml path+name`, and component `fileName` work
 - `uxui_semantic_spec.md`, `component_state_map.json`, and `component_visual_parts.json` when requirements and a design image are both available
@@ -158,7 +169,7 @@ Required inputs:
 - `layout_spec.json` and `slice_plan.json` when using a design image or reference mockup as layout source
 - `asset_manifest.json` or equivalent manifest
 - `fgui_id_registry.json` with stable package IDs, resource IDs, and component instance IDs
-- `fgui_spec.md` or equivalent FairyGUI assembly plan containing semantic component mapping, layout region table, slot table, component ownership table, controller table, gear mapping table, Instance Configuration table, Visual Part Coverage table, transition table, relation/adaptation rules, and a Display List whose image rows declare `Asset Name`, `Size`, and `Size Source=asset_manifest.displaySize`
+- `fgui_spec.md` or equivalent FairyGUI assembly plan containing semantic component mapping, layout region table, slot table, component ownership table, Component Reuse Plan, controller table with `Exported`, gear mapping table, Instance Configuration with Controller Parameters, Visual Part Coverage, transition table, relation/adaptation rules, and a Display List whose rows declare `Asset Name`, `Size`, `Size Source`, `Z Layer`, and `Occlusion Policy`
 - real asset file list, or an explicit statement that file existence cannot be checked in this environment
 - `references/asset-size-contract.md`
 - valid reference-image declarations when the project generated or reconstructed visual assets
@@ -180,8 +191,11 @@ When strict inputs are present:
 - Apply the complete XML parsing specification, not a summary.
 - For XML generated from a design image, do not emit the main panel XML until semantic mapping, `layout_spec.json`, `slice_plan.json`, the layout region table, slot table, component ownership table, controller table, gear mapping table, and relation/adaptation rules exist.
 - Treat same-component/different-state cases as reusable components with different `instanceId` and `stateVariant`, not as unrelated semantic component types.
-- For each reusable instance, require one verifiable strategy: explicit variant component, supported extension override, editor-verified Controller-page encoding, runtime binding with readable preview fallback, or an intentionally shared static default.
+- For each reusable component, require a `reusePlan`. Prefer a single base component, supported extension override, exported Controller parameter, runtime binding with readable preview fallback, or reusable child components. For a fixed instance page, mark the target Controller `exported="true"` and pass the exact page index through the parent `controller="name,index"`. Allow a variant only when `reusePlan.strategy=variant_allowed` and the XML structure is materially different.
 - Reject semantically different instances that all use one unconfigured default component, even when the leaf component's Controllers and Gears are structurally valid.
+- Reject separate component XML files whose normalized hierarchy is identical and whose differences are only title, icon, portrait, value, color, size, localization, or selected Controller page.
+- Emit `<displayList>` direct children back-to-front. Opaque full-size backgrounds must come first; transparent frames may come later only when explicitly declared and verified.
+- Reject production icons made with FairyGUI Graph, SVG, font glyphs, PIL/ImageDraw geometry, Canvas paths, or renamed procedural PNG placeholders. Require approved bitmap provenance in Manifest `assetSource`.
 - Editor-preview text must be readable before project runtime localization executes. Prefer literal preview text plus `customData="loc:<key>"`; raw visible `@ui_...` keys block approved-design visual review unless an editor localization plugin is verified.
 - Cover package resources, component roots, controllers/actions, displayList, base object attributes, filters, image/loader/text/richtext/graph/list/group, Button/Label/ComboBox/ProgressBar/Slider/ScrollBar/Tree, editor-export compatibility attributes, extension parameter child nodes, Relation, Gear, Transition, enums, branch/high-resolution notes, naming, resource organization, manifest mapping, ID stability, adaptation, localization, and validation rules.
 - `src` must be a registered resource ID.
@@ -209,13 +223,14 @@ When strict inputs are present:
 3. Allocate IDs only for new resources/instances; append them to the registry before XML references them.
 4. Stage every resource under `package.outputPath/packageRelativeFile` and validate the complete package bundle.
 5. Generate `package.xml` from package-local paths and validate `path + name` against real files.
-6. Generate reusable leaf components and any required preview-variant components.
-7. Materialize every required part from `component_visual_parts.json`, then generate composite components and the main screen.
-8. Materialize every `component_state_map.visualInstances` entry in the parent XML and validate its component file, default Controller pages, extension parameters, preview text, and runtime-binding declaration.
-9. Validate exact component `fileName` paths; basename-only matches are forbidden in `fresh` mode.
-10. Run structural and cross-source validation in the selected profile, including visual-part coverage.
-11. Produce the import checklist and mark XML as `draft_unverified` until FairyGUI editor accepts it.
-12. After editor cleanup/export, rerun validation using `--mode editor-compatible` and record any accepted compatibility differences.
+6. Generate reusable leaf components and parameterized child components first.
+7. Generate base composite components; generate a variant only after `validate_component_reuse.py` accepts its structural justification.
+8. Materialize every required part from `component_visual_parts.json`, then generate the main screen.
+9. Materialize every `component_state_map.visualInstances` entry in the parent XML and validate its base component file, default Controller pages, extension parameters, preview text, runtime-binding declaration, and any justified variant.
+10. Validate exact component `fileName` paths; basename-only matches are forbidden in `fresh` mode.
+11. Run structural and cross-source validation in the selected profile, including component reuse, display-list z-order, bitmap provenance, and visual-part coverage.
+12. Produce the import checklist and mark XML as `draft_unverified` until FairyGUI editor accepts it.
+13. After editor cleanup/export, rerun validation using `--mode editor-compatible` and record any accepted compatibility differences.
 
 ### Strict Failure Policy
 
@@ -284,8 +299,16 @@ UIProduction/
     ├── semantic_layout_consistency_report.md
     ├── semantic_controller_mapping_report.json
     ├── semantic_controller_mapping_report.md
+    ├── component_reuse_report.json
+    ├── component_reuse_report.md
+    ├── display_list_z_order_report.json
+    ├── display_list_z_order_report.md
+    ├── bitmap_asset_provenance_report.json
+    ├── bitmap_asset_provenance_report.md
     ├── visual_part_coverage_report.json
     ├── visual_part_coverage_report.md
+    ├── pipeline_stage_timings.json
+    ├── pipeline_stage_timings.md
     ├── cut_report.json
     ├── xml_readiness_report.json
     ├── xml_blocking_report.md
@@ -311,10 +334,18 @@ Load only the relevant reference files for the current step:
 - `references/design-mockup-approval-contract.md`: full-screen mockup generation, explicit human approval, approval scope, and invalidation rules.
 - `references/asset-size-contract.md`: source pixel, display size, scale-policy, layout, and XML consistency rules.
 - `references/semantic-controller-mapping-contract.md`: requirement/design evidence, state ownership, Controller pages, Gear mappings, layout inheritance, external Button/Label instance parameter semantics, and XML implementation rules.
-- `references/component-instance-configuration-contract.md`: per-instance defaults, variant components, extension overrides, runtime bindings, readable preview text, and visual-review rules for reusable components.
-- `scripts/validate_semantic_controller_mapping.py`: executable cross-source validator for `ui_spec.md`, `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, per-instance configuration, and optional component XML.
+- `references/component-reuse-parameterization-contract.md`: reuse-first component design, base files, parameterizable fields, reusable child components, justified variants, and duplicate-structure blocking.
+- `scripts/validate_component_reuse.py`: validates `reusePlan`, Component Reuse Plan, external parameter declarations, composite-child references, and normalized XML structure.
+- `references/component-instance-configuration-contract.md`: per-instance defaults, extension overrides, exported Controller parameters, runtime bindings, justified structural variants, readable preview text, and visual-review rules for reusable components.
+- `scripts/validate_semantic_controller_mapping.py`: executable cross-source validator for `ui_spec.md`, `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `fgui_spec.md`, Controller exports/parameters, per-instance configuration, and optional component XML.
+- `references/display-list-z-order-contract.md`: back-to-front Display List planning, opaque-background placement, transparent-frame classification, and overlay rules.
+- `scripts/validate_display_list_z_order.py`: validates fgui_spec order/layers, layout z fields, and XML direct-child order.
+- `references/bitmap-icon-source-contract.md`: approved bitmap provenance and no-procedural-icon rules.
+- `scripts/validate_bitmap_asset_provenance.py`: validates icon `assetSource` evidence and scans production scripts for procedural geometry.
 - `references/visual-part-coverage-contract.md`: complete-screen visible-part inventory and no-silent-omission rules.
 - `scripts/validate_visual_part_coverage.py`: validates `component_visual_parts.json` against Manifest, `fgui_spec.md`, Registry, and optional XML.
+- `references/pipeline-stage-timing-contract.md`: canonical stage IDs, active/waiting/external categories, rework-attempt preservation, completion rules, and final timing-report requirements.
+- `scripts/record_pipeline_timing.py`: initializes, starts, finishes, skips, snapshots, finalizes, validates, and command-wraps per-stage timing.
 - `references/package-resource-path-contract.md`: UIProduction-root paths versus package-local paths, atomic package staging, and exact resource resolution.
 - `references/design-to-layout-contract.md`: design image to layout/slice/XML gated workflow.
 - `references/fairygui-xml-contract.md`: concise XML gate.
@@ -342,6 +373,9 @@ Before XML generation, validate semantic Controller/Gear mapping and then run re
 
 ```bash
 python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
+python scripts/validate_component_reuse.py --root UIProduction --stage xml_generation --out UIProduction/reports/component_reuse_report.json --report-md UIProduction/reports/component_reuse_report.md
+python scripts/validate_display_list_z_order.py --root UIProduction --stage xml_generation --out UIProduction/reports/display_list_z_order_report.json --report-md UIProduction/reports/display_list_z_order_report.md
+python scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage xml_generation --out UIProduction/reports/bitmap_asset_provenance_report.json --report-md UIProduction/reports/bitmap_asset_provenance_report.md
 python scripts/validate_visual_part_coverage.py --root UIProduction --stage xml_generation --out UIProduction/reports/visual_part_coverage_report.json --report-md UIProduction/reports/visual_part_coverage_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
@@ -370,13 +404,17 @@ python scripts/validate_fgui_xml.py --xml-dir UIProduction/fgui_xml/<package_nam
 
 Before calling the pipeline complete, confirm:
 
+- `scripts/record_pipeline_timing.py --root UIProduction finalize --status completed` and `validate` pass; both timing reports exist and the final handoff includes every stage duration.
 - `scripts/verify_embedded_docs.py` confirms both embedded complete source documents are intact.
 - Blocking requirements were resolved or explicitly asked.
 - Requirement-to-visual semantic mapping exists before layout and XML when a design image is used.
 - Requirement states, semantic ownership, layout state fields, `fgui_spec.md` Controllers/Gears/Instance Configuration, and existing XML pass `validate_semantic_controller_mapping.py` for the requested stage.
+- Reuse plans, parameterizable fields, exported Controller parameters, child-component references, Component Reuse Plan rows, and XML structural signatures pass `validate_component_reuse.py`.
+- Display List z-order passes `validate_display_list_z_order.py`; opaque backgrounds precede content and intentional frames/overlays are explicitly classified.
+- Every icon has approved bitmap provenance and `validate_bitmap_asset_provenance.py` finds no procedural vector-like generator.
 - Every approved-design visible part is recorded in `component_visual_parts.json`; asset-backed parts exist in Manifest, required XML nodes exist, and detailed Graph downgrades have explicit human approval.
-- Same-component/different-state visual cases are represented as state variants, while preview variants remain traceable to the same semantic component type.
-- Every reusable visual instance has a unique `xmlInstanceName`, explicit implementation mode, component file, Controller pages where applicable, readable preview values, and runtime bindings.
+- Same-component/different-state visual cases are represented by one base component plus state/instance configuration; separate variants exist only for documented and machine-verifiable structural differences.
+- Every reusable component has a valid `reusePlan` and matching Component Reuse Plan row; every reusable visual instance has a unique `xmlInstanceName`, explicit implementation mode, base component file, Controller pages where applicable, readable preview values, and runtime bindings.
 - FairyGUI preview contains no unintended duplicate default portraits/icons/titles, raw localization keys, blank controls, or white placeholder blocks.
 - Visual resource production used at least one valid primary reference image with an explicit role.
 - Full-screen design generation produced `visual_design_brief.md`, an exact approved design image, and a passing human approval gate before any downstream decomposition or production.

@@ -31,6 +31,33 @@ Run `python scripts/verify_embedded_docs.py` after installation or migration. An
 15. FairyGUI editor publish
 16. Unity import and smoke test
 
+## Mandatory Stage Timing
+
+Read `references/pipeline-stage-timing-contract.md` and initialize timing before Stage 1:
+
+```bash
+python scripts/record_pipeline_timing.py --root UIProduction init
+```
+
+Before entering each canonical stage, run `start --stage <stage_id>`. Immediately after the stage completes, blocks, or fails, run `finish` with the matching status and produced artifacts. Use `skip` only when a stage is genuinely outside the agreed scope.
+
+Only one stage may be running at a time. Rework creates another attempt for the same stage with `--rework`; it must not overwrite the earlier duration.
+
+Stage 5 is normally `waiting` time. Stages 15 and 16 are normally `external` time. The final report must keep active processing, human waiting, and external-tool time separate.
+
+Every command updates:
+
+```text
+reports/pipeline_stage_timings.json
+reports/pipeline_stage_timings.md
+```
+
+A timing snapshot may be generated while approval or external work is pending:
+
+```bash
+python scripts/record_pipeline_timing.py --root UIProduction snapshot
+```
+
 ## Stage 1: Requirement Intake
 
 Check whether the current requirement or conversation contains enough information.
@@ -95,9 +122,12 @@ Generate one or more complete-screen design proposals under `generated/design/`.
 
 After generation:
 
+- finish `design_mockup_generation`
+- start `design_approval` so the human wait is measured separately
 - create `reports/design_draft_review.md`
 - create or update `reports/design_approval.json` with `status=pending`
 - present the exact generated file to the user
+- write a timing snapshot
 - stop the pipeline
 
 Do not generate semantic maps, layout specs, asset manifests, sheets, FairyGUI plans, or XML in the same uninterrupted run.
@@ -119,7 +149,7 @@ Rules:
 - `approvedFor` must contain the requested next stage
 - silence, inferred preference, or generic continuation is not approval
 
-If the gate fails, output `设计稿确认阻塞报告` and remain in the design/revision stage.
+If the gate fails, finish the current `design_approval` attempt as `blocked`, output `设计稿确认阻塞报告`, and remain in the design/revision stage. A later approval or revision starts a new attempt with `--rework`.
 
 ## Stage 6: Requirement-To-Approved-Design Semantic Analysis
 
@@ -136,11 +166,14 @@ Rules:
 - If two visible objects are the same component in different states, map them to the same `componentType` with different `instanceId` and `stateVariant`.
 - Record whether business state is owned by GamePlay/Config, visual state by FairyGUI Controller/Gear, and continuous runtime data by GameUI.
 - Use `references/semantic-controller-mapping-contract.md` to decide which objects require Controllers, which visual properties require Gears, and which values must stay runtime-bound.
+- Read `references/component-reuse-parameterization-contract.md` before choosing component files. Every reusable component must declare a `reusePlan`; title, icon, portrait, number, color, size, localization, or selected-page differences must remain parameters rather than separate XML files.
 - Use `references/component-instance-configuration-contract.md` to define every reusable visual instance's `xmlInstanceName`, `controllerPages`, implementation mode, component file, preview values, and runtime bindings.
 - Use `references/visual-part-coverage-contract.md` to create `component_visual_parts.json` from the approved design. Record every required visible icon, frame, title decoration, background, separator, marker, loader, and text part with a project-defined role and explicit implementation.
-- Reusable instances that differ in role, selected state, title, icon, or preview data must not all use one unconfigured default component.
+- Reusable instances that differ in role, selected state, title, icon, or preview data must not all use one unconfigured default component, but they also must not be split into near-identical variants merely to preserve those values.
+- Prefer external Button/Label parameters, exported Controller pages, runtime binding, and reusable child components. For fixed per-instance pages, require target `controller@exported=true` and parent `controller="name,pageIndex"`. Allow `variant_component` only for a material structural or verified compatibility difference.
 - A required visible part may not disappear merely because it is non-interactive or visually small.
-- Run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage semantic_analysis` before layout work.
+- Run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage semantic_analysis` and `scripts/validate_component_reuse.py --root UIProduction --stage semantic_analysis` before layout work.
+- Classify every layout object with `zLayer` and `occlusionPolicy`; backgrounds are backmost and use the lowest XML order.
 - Record visible design elements that are not supported by requirements and requirements that are not visible in the design.
 
 The approved design image must be named as the visual source in `uxui_semantic_spec.md`.
@@ -164,7 +197,7 @@ Rules:
 
 ## Stage 8: Asset and Sheet Planning
 
-Run the approval gate for `asset_planning`, read `references/visual-reference-contract.md` and `references/asset-size-contract.md`, then create `manifests/asset_manifest.json` and `specs/sheet_plan.md`.
+Run the approval gate for `asset_planning`, read `references/visual-reference-contract.md`, `references/asset-size-contract.md`, and `references/bitmap-icon-source-contract.md`, then create `manifests/asset_manifest.json` and `specs/sheet_plan.md`.
 
 The manifest owns:
 
@@ -179,6 +212,7 @@ The manifest owns:
 - sheet/cell placement
 - transparent/trim/padding requirements
 - FairyGUI package/layer/component mapping
+- approved bitmap provenance in `assetSource` for every icon-like asset
 
 The sheet plan owns:
 
@@ -248,12 +282,13 @@ It must include:
 - layout region table: each visual region's bounds, parent component, anchor/relation strategy, and whether it is static, interactive, or runtime-filled
 - slot table: customer slots, ingredient cells, equipment slots, plate slots, takeout slots, drag/drop hit areas, and their stable names, xy, size, pivot, semantic IDs, and binding IDs
 - component ownership table: which component owns each state, hit area, drag target, list item, and reusable visual element
-- controller table derived from requirement-defined and design-visible discrete states
+- controller table derived from requirement-defined and design-visible discrete states, including whether each Controller is exported
 - gear mapping table: controller/page to object visibility, icon, text, position, size, look, color, animation, or font-size changes
 - requirement IDs and state-owner columns in Controller and Gear tables
 - transition table
 - relation/adaptation rules
-- mandatory Instance Configuration table covering every `component_state_map.visualInstances` entry
+- mandatory Component Reuse Plan table covering every reusable semantic component
+- mandatory Instance Configuration table covering every `component_state_map.visualInstances` entry, including Controller Parameters
 - mandatory Visual Part Coverage table covering every `component_visual_parts.json` entry
 - external component parameter table for Button/Label instance title, icon, selected-state, and localization overrides
 - readable editor-preview values and localization-key storage strategy
@@ -261,7 +296,7 @@ It must include:
 - Unity binding fields
 - automation risk notes
 
-Before XML readiness, run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage fairygui_assembly`. Missing Controller pages or Gear rows are blockers, not documentation warnings.
+Before XML readiness, run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_component_reuse.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_display_list_z_order.py --root UIProduction --stage fairygui_assembly`, and `scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage fairygui_assembly`. Missing Controller exports/parameters, Gear rows, reuse plans, back-to-front layer declarations, bitmap provenance, or justified structural differences are blockers.
 
 ## Stage 12: FairyGUI Package Resource Staging
 
@@ -289,10 +324,16 @@ Only `art/icon_anvil.png` may be used by package-local XML.
 
 ## Stage 13: XML Draft Generation
 
-Before generation, run `scripts/validate_semantic_controller_mapping.py --stage xml_generation`, then run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
+Before generation, run `scripts/validate_semantic_controller_mapping.py --stage xml_generation`, `scripts/validate_component_reuse.py --stage xml_generation`, `scripts/validate_display_list_z_order.py --stage xml_generation`, `scripts/validate_bitmap_asset_provenance.py --stage xml_generation`, and `scripts/validate_visual_part_coverage.py --stage xml_generation`, then run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
 
 Generate:
 
+- `reports/component_reuse_report.json`
+- `reports/component_reuse_report.md`
+- `reports/display_list_z_order_report.json`
+- `reports/display_list_z_order_report.md`
+- `reports/bitmap_asset_provenance_report.json`
+- `reports/bitmap_asset_provenance_report.md`
 - `reports/xml_readiness_report.json`
 - `reports/xml_generation_input_snapshot.json`
 - `fgui_xml/<package>/package.xml`
@@ -304,10 +345,12 @@ Rules:
 - Do not generate a main panel XML from a design image until `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `slice_plan.json`, and `fgui_spec.md` agree.
 - Select `fresh` for new XML or `editor-compatible` only for XML already accepted/cleaned/exported by FairyGUI editor.
 - Use stable IDs from the registry and register new IDs before XML references them.
-- Generate in dependency order: `package.xml`, leaf components, composite components, main panel.
+- Generate in dependency order: `package.xml`, reusable leaf components, reusable parameterized child components, base composite components, justified structural variants, main panel.
 - Register every referenced component/image in `package.xml`.
+- Emit each component `<displayList>` back-to-front: opaque backgrounds first, normal content next, transparent frames/overlays only after content.
+- Never synthesize art-directed icons with Graph, SVG, font glyphs, PIL/ImageDraw, or other procedural vector-like drawing; use only approved bitmap sources recorded in Manifest.
 - For external `<Button .../>` and `<Label .../>` instance parameters, require the target component `extention` to match, validate allowed fields, and resolve all `ui://` values.
-- For each visual instance, materialize the declared implementation mode. `variant_component` must point to a registered XML whose default Controller pages match `controllerPages`; `controller_pages` requires editor-verified encoding; `runtime_binding` requires readable preview fallback; `static_default` is allowed only for intentionally identical instances.
+- For each visual instance, materialize the declared implementation mode. Prefer `extension_override`, `controller_pages`, `runtime_binding`, or reusable children. `controller_pages` requires one exported target Controller, declared `controllerParameters`, and exact parent `controller="name,pageIndex"`. `variant_component` requires `reusePlan.strategy=variant_allowed`, a valid `variantJustification`, and a materially different XML structure; `static_default` is allowed only for intentionally identical instances.
 - For each required visual part, materialize the declared Manifest asset or XML node. Detailed Graph fallbacks require explicit human approval.
 - Do not leave visible `@ui_...` keys in approved-design editor previews unless a verified editor localization plugin resolves them. Store the localization key separately, such as in `customData`.
 - Generate `package.xml path + name` from `packageRelativeFile`, never from the UIProduction-root-relative `file` field.
@@ -320,7 +363,7 @@ Rules:
 
 ## Stage 14: Validation
 
-Run `scripts/validate_pipeline.py` and write `reports/pipeline_validate_report.json`.
+Run `scripts/validate_pipeline.py` and write `reports/pipeline_validate_report.json`. Also retain the dedicated component-reuse, display-list z-order, bitmap-provenance, and visual-part reports.
 
 Run `scripts/validate_fgui_xml.py` with `--manifest`, `--registry`, and `--mode fresh` for new XML. The validator must resolve every `package.xml path + name` and image `fileName` against the exact package directory; basename-only matches are forbidden in fresh mode. After FairyGUI editor cleanup/export, rerun with `--mode editor-compatible` and keep a separate report.
 
@@ -335,6 +378,8 @@ Also manually inspect:
 - relation behavior at target resolutions
 - text fields, readable preview text, and localization keys
 - repeated component instances use the intended portraits, icons, titles, states, and default Controller pages
+- components that differ only by content or instance size use one base component plus parameters rather than duplicate XML variants
+- repeated icon-plus-value, icon-plus-title, badge, row, or panel-shell structures are extracted as reusable child components when appropriate
 - all required visual parts from `component_visual_parts.json` are visible, including small icons and non-interactive framing/decorative elements
 - no white placeholder blocks, blank buttons, raw localization keys, duplicated default content, or silently omitted frames/titles/icons remain
 - list default item URLs
@@ -365,9 +410,33 @@ Check:
 - list items instantiate
 - loaders resolve expected resources
 
+## Stage 17: Timing Finalization And Handoff
+
+After all agreed production, editor, and Unity stages finish:
+
+```bash
+python scripts/record_pipeline_timing.py --root UIProduction finalize --status completed
+python scripts/record_pipeline_timing.py --root UIProduction validate
+```
+
+`completed` is allowed only when all 16 canonical stages are `completed` or explicitly `skipped`. A blocked, failed, or incomplete run must be finalized as `blocked`, `failed`, or `partial` instead.
+
+The final handoff must include:
+
+- total wall-clock duration
+- total active-processing duration
+- total human-waiting duration
+- total external-tool duration
+- each stage's status, attempts, and duration
+- `reports/pipeline_stage_timings.json`
+- `reports/pipeline_stage_timings.md`
+
+Do not reconstruct stage durations from memory or file timestamps after the flow ends.
+
 ## Rework Rules
 
 - Rework only the failed scope when possible: one full-screen design draft, one semantic component, one state group, one asset, one sheet, one component, or one controller.
+- Record every rework as a new timing attempt with `--rework`; preserve the failed or superseded attempt.
 - Any change to an approved full-screen design invalidates its hash-bound approval and returns the pipeline to Stage 5.
 - Do not regenerate all IDs during a rework.
 - Do not rename assets unless the manifest changes first.

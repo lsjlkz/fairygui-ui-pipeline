@@ -130,6 +130,7 @@ Every component must contain:
 - `states`
 - `controllers`
 - `reusable`
+- `reusePlan` when `reusable=true`, following `references/component-reuse-parameterization-contract.md`
 - `requirementIds`
 
 Every visual instance must follow `references/component-instance-configuration-contract.md` and contain:
@@ -141,11 +142,12 @@ Every visual instance must follow `references/component-instance-configuration-c
 - `controllerPages` when discrete Controller state participates
 - `implementation.configurationMode`
 - `implementation.componentFile`
+- `implementation.controllerParameters` when `configurationMode=controller_pages`
 - `implementation.previewValues`
 - `implementation.runtimeBindings`
 - `requirementIds`
 
-A reusable component may have a correct Controller/Gear implementation while every parent instance still displays the same default page. Therefore, semantically different reusable instances must use an explicit variant component, supported extension override, editor-verified Controller-page encoding, or runtime binding with a readable preview fallback. `static_default` is forbidden when instance signatures differ.
+A reusable component may have a correct Controller/Gear implementation while every parent instance still displays the same default page. Therefore, semantically different reusable instances must use a supported extension override, editor-verified Controller-page encoding, runtime binding with a readable preview fallback, or reusable child components. `static_default` is forbidden when instance signatures differ. A separate variant component is allowed only when `reusePlan.strategy=variant_allowed` and the structure is materially different; title, icon, portrait, number, color, size, localization, or selected-page differences alone must remain parameters.
 
 Every state group must contain:
 
@@ -205,18 +207,23 @@ The following tables are mandatory for stateful screens.
 
 ### Controllers
 
-| Component | Controller | Pages | Default | Used By | Requirement IDs | State Owner |
-|---|---|---|---|---|---|---|
+| Component | Controller | Pages | Default | Exported | Used By | Requirement IDs | State Owner |
+|---|---|---|---|---|---|---|---|
 
 ### Gear Mapping Table
 
 | Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
 |---|---|---|---|---|---|---|
 
+### Component Reuse Plan
+
+| Component Type | Strategy | Base Component File | Extension | Parameterizable Fields | Child Components | Variant Reasons | Requirement IDs |
+|---|---|---|---|---|---|---|---|
+
 ### Instance Configuration
 
-| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
-|---|---|---|---|---|---|---|---|---|---|
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Controller Parameters | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 Rules:
 
@@ -226,6 +233,7 @@ Rules:
 - every gear mapping controller/page must resolve to the Controllers table
 - every semantic `stateGroup.gearType` must have a corresponding Gear Mapping row
 - components with runtime-only state must explicitly say `Controller=none` and identify their runtime binding owner
+- every reusable semantic component must appear exactly once in Component Reuse Plan
 - every `visualInstances` entry must appear exactly once in Instance Configuration
 - the instance component file and configuration mode must match `component_state_map.json`
 - readable preview values are required when runtime code or localization normally fills content
@@ -235,9 +243,10 @@ Rules:
 When XML exists:
 
 - every planned controller must appear in the owning component XML
+- any Controller passed by the parent must be marked `exported="true"`; the parent instance must use the exact `controller="name,pageIndex"` value derived from the target pages sequence
 - every planned gear type must appear on the expected target object
 - every semantic visual instance must resolve to exactly one parent XML component instance by `xmlInstanceName`
-- `variant_component` files must have default selected Controller pages matching the declared instance `controllerPages`
+- `variant_component` files must have default selected Controller pages matching the declared instance `controllerPages`, a valid reuse-plan justification, and a structure that is not identical to the base component
 - extension override nodes must match the declared per-instance parameters
 - approved-design preview components must not display raw localization keys as visible text
 - every gear controller reference must resolve to a controller in the same component
@@ -263,7 +272,9 @@ Before XML generation, block when:
 - `scripts/validate_semantic_controller_mapping.py` fails
 - XML Controller/Gear implementation disagrees with the semantic and assembly specifications
 - semantically different reusable instances all use an unconfigured default component
-- any instance component file, default Controller page, external parameter, preview value, or runtime-binding declaration is missing or inconsistent
+- data-only differences were split into separate component XML files instead of parameters, Controller pages, runtime bindings, or reusable children
+- a reusable component lacks `reusePlan`, or `fgui_spec.md` lacks Component Reuse Plan
+- any instance component file, default Controller page, external Controller parameter, external Button/Label parameter, preview value, or runtime-binding declaration is missing or inconsistent
 - the FairyGUI preview still contains raw localization keys, blank controls, white placeholders, or unintended duplicated default content
 
 ## Required Validator
@@ -278,8 +289,15 @@ python scripts/validate_semantic_controller_mapping.py \
   --report-md UIProduction/reports/semantic_controller_mapping_report.md
 ```
 
-When XML already exists, add:
+Also run the reuse validator:
 
 ```bash
---xml-dir UIProduction/fgui_xml/<package_name>
+python scripts/validate_component_reuse.py \
+  --root UIProduction \
+  --stage xml_generation \
+  --xml-dir UIProduction/fgui_xml/<package_name> \
+  --out UIProduction/reports/component_reuse_report.json \
+  --report-md UIProduction/reports/component_reuse_report.md
 ```
+
+When XML already exists, add `--xml-dir UIProduction/fgui_xml/<package_name>` to the semantic mapping validator as well.

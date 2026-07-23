@@ -19,6 +19,9 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
+from validate_component_reuse import validate as validate_component_reuse
+from validate_display_list_z_order import validate as validate_display_list_z_order
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 from verify_embedded_docs import verify as verify_embedded_docs
@@ -413,7 +416,7 @@ def validate_fgui_spec(report: dict[str, Any], path: Path, manifest: dict[str, A
         instance_headers, instance_rows = parse_markdown_table(text, "Instance Configuration")
         required_instance_columns = {
             "instance id", "xml name", "component type", "component file", "configuration mode",
-            "controller pages", "extension parameters", "preview values", "runtime bindings", "requirement ids",
+            "controller pages", "controller parameters", "extension parameters", "preview values", "runtime bindings", "requirement ids",
         }
         missing_instance_columns = sorted(required_instance_columns.difference(instance_headers))
         if missing_instance_columns:
@@ -780,6 +783,9 @@ def main() -> int:
         "resourceGeneration": args.resource_generation,
         "embeddedDocsIntegrity": None,
         "semanticControllerMapping": None,
+        "componentReuse": None,
+        "displayListZOrder": None,
+        "bitmapAssetProvenance": None,
         "visualPartCoverage": None,
         "designApproved": None,
         "packageName": None,
@@ -802,8 +808,14 @@ def main() -> int:
         "assetSizeContract": skill_root / "references" / "asset-size-contract.md",
         "semanticControllerMappingContract": skill_root / "references" / "semantic-controller-mapping-contract.md",
         "componentInstanceConfigurationContract": skill_root / "references" / "component-instance-configuration-contract.md",
+        "componentReuseParameterizationContract": skill_root / "references" / "component-reuse-parameterization-contract.md",
+        "displayListZOrderContract": skill_root / "references" / "display-list-z-order-contract.md",
+        "bitmapIconSourceContract": skill_root / "references" / "bitmap-icon-source-contract.md",
         "visualPartCoverageContract": skill_root / "references" / "visual-part-coverage-contract.md",
         "semanticControllerMappingValidator": skill_root / "scripts" / "validate_semantic_controller_mapping.py",
+        "componentReuseValidator": skill_root / "scripts" / "validate_component_reuse.py",
+        "displayListZOrderValidator": skill_root / "scripts" / "validate_display_list_z_order.py",
+        "bitmapAssetProvenanceValidator": skill_root / "scripts" / "validate_bitmap_asset_provenance.py",
         "visualPartCoverageValidator": skill_root / "scripts" / "validate_visual_part_coverage.py",
         "packageResourcePathContract": skill_root / "references" / "package-resource-path-contract.md",
     }
@@ -925,6 +937,25 @@ def main() -> int:
                 Path(item["path"]) if item.get("path") else root,
             )
 
+        component_reuse_report = validate_component_reuse(root, "xml_generation")
+        report["componentReuse"] = component_reuse_report.get("ok")
+        for item in component_reuse_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "component_reuse_" + item.get("code", "invalid"),
+                item.get("message", "组件复用与参数化校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in component_reuse_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "component_reuse_" + item.get("code", "warning"),
+                item.get("message", "组件复用与参数化警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
         visual_part_report = validate_visual_part_coverage(root, "xml_generation")
         report["visualPartCoverage"] = visual_part_report.get("ok")
         for item in visual_part_report.get("errors", []):
@@ -944,7 +975,84 @@ def main() -> int:
                 Path(item["path"]) if item.get("path") else root,
             )
 
+    if not design_driven and (specs_dir / "component_state_map.json").is_file():
+        semantic_controller_report = validate_semantic_controller_mapping(root, "xml_generation")
+        report["semanticControllerMapping"] = semantic_controller_report.get("ok")
+        for item in semantic_controller_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "semantic_controller_" + item.get("code", "invalid"),
+                item.get("message", "语义状态与 Controller/Gear 映射校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in semantic_controller_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "semantic_controller_" + item.get("code", "warning"),
+                item.get("message", "语义状态与 Controller/Gear 映射警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
+        component_reuse_report = validate_component_reuse(root, "xml_generation")
+        report["componentReuse"] = component_reuse_report.get("ok")
+        for item in component_reuse_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "component_reuse_" + item.get("code", "invalid"),
+                item.get("message", "组件复用与参数化校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in component_reuse_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "component_reuse_" + item.get("code", "warning"),
+                item.get("message", "组件复用与参数化警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
+    if fgui_spec_path.is_file():
+        z_order_report = validate_display_list_z_order(root, "xml_generation")
+        report["displayListZOrder"] = z_order_report.get("ok")
+        for item in z_order_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "display_list_" + item.get("code", "invalid"),
+                item.get("message", "Display List 层级顺序校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in z_order_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "display_list_" + item.get("code", "warning"),
+                item.get("message", "Display List 层级顺序警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
     if manifest:
+        provenance_report = validate_bitmap_asset_provenance(root, "xml_generation")
+        report["bitmapAssetProvenance"] = provenance_report.get("ok")
+        for item in provenance_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "bitmap_provenance_" + item.get("code", "invalid"),
+                item.get("message", "图标位图来源校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in provenance_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "bitmap_provenance_" + item.get("code", "warning"),
+                item.get("message", "图标位图来源警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
         validate_asset_files(report, root, manifest, args.skip_asset_existence, args.profile)
 
     report["ready"] = not report["blockers"]

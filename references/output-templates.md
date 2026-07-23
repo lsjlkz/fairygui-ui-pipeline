@@ -242,6 +242,18 @@ Record after explicit confirmation of the exact file:
       "states": ["idle", "cooking", "ready", "overcooked"],
       "controllers": ["state"],
       "reusable": true,
+      "reusePlan": {
+        "strategy": "single_component",
+        "baseComponentFile": "equipment_slot.xml",
+        "extension": "none",
+        "parameterizableFields": [
+          "controller.state",
+          "runtime.foodId",
+          "runtime.cookProgress"
+        ],
+        "childComponentFiles": [],
+        "variantReasons": []
+      },
       "requirementIds": ["REQ-EQUIPMENT-STATE"]
     }
   ],
@@ -257,8 +269,11 @@ Record after explicit confirmation of the exact file:
       "slotRole": "cook_source",
       "requirementIds": ["REQ-EQUIPMENT-STATE"],
       "implementation": {
-        "configurationMode": "variant_component",
-        "componentFile": "equipment_slot_ready.xml",
+        "configurationMode": "controller_pages",
+        "componentFile": "equipment_slot.xml",
+        "controllerParameters": {
+          "state": "ready"
+        },
         "previewValues": {
           "title": "READY",
           "food": "preview_food"
@@ -352,6 +367,8 @@ Record after explicit confirmation of the exact file:
       "binding": "equipmentSlotLeft",
       "stateOwner": "FGUI",
       "runtimeRole": "cook_source",
+      "zLayer": "content",
+      "occlusionPolicy": "normal",
       "requirementIds": ["REQ-EQUIPMENT-STATE"],
       "slicePolicy": "use_component"
     }
@@ -412,7 +429,12 @@ Record after explicit confirmation of the exact file:
       "displaySize": [1920, 1080],
       "scalePolicy": "pixel_exact",
       "renderMode": "normal",
-      "nineSliceGrid": null
+      "nineSliceGrid": null,
+      "assetSource": {
+        "mode": "provided_bitmap",
+        "sourceFile": "references/ui_reference.png",
+        "reviewStatus": "approved"
+      }
     }
   ]
 }
@@ -466,8 +488,10 @@ Cell list:
 
 ## Display List
 
-| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Binding |
-|---|---:|---|---|---|---|---|---|---|---|
+Rows are ordered back-to-front. Opaque backgrounds use the smallest order and must appear first in XML.
+
+| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Z Layer | Occlusion Policy | Binding |
+|---|---:|---|---|---|---|---|---|---|---|---|---|
 
 ## Layout Region Table
 
@@ -484,10 +508,17 @@ Cell list:
 | Responsibility | Owner Component | Should Not Live In |
 |---|---|---|
 
+## Component Reuse Plan
+
+| Component Type | Strategy | Base Component File | Extension | Parameterizable Fields | Child Components | Variant Reasons | Requirement IDs |
+|---|---|---|---|---|---|---|---|
+
 ## Controllers
 
-| Component | Controller | Pages | Default | Used By | Requirement IDs | State Owner |
-|---|---|---|---|---|---|---|
+Set `Exported=true` only when a parent component instance passes that Controller through its `controller="name,pageIndex"` attribute.
+
+| Component | Controller | Pages | Default | Exported | Used By | Requirement IDs | State Owner |
+|---|---|---|---|---|---|---|---|
 
 ## Gear Mapping Table
 
@@ -510,8 +541,8 @@ Cell list:
 
 Use this table for every `component_state_map.visualInstances` entry. Different reusable instances must declare how their Controller pages, titles, icons, preview values, and runtime bindings are materialized.
 
-| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
-|---|---|---|---|---|---|---|---|---|---|
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Controller Parameters | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 ## External Component Parameters
 
@@ -548,6 +579,77 @@ Use this table whenever a parent component instance contains an external `<Butto
     "instanceConfigurations": 8
   }
 }
+```
+
+## component_reuse_report.json
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-01-01T00:00:00Z",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "xmlDir": "UIProduction/fgui_xml/package_name",
+  "errors": [],
+  "warnings": [],
+  "summary": {
+    "reusableComponents": 4,
+    "visualInstances": 8,
+    "variantFiles": 0
+  }
+}
+```
+
+## display_list_z_order_report.json
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-01-01T00:00:00Z",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "xmlDir": "UIProduction/fgui_xml/package_name",
+  "errors": [],
+  "warnings": [],
+  "summary": {
+    "parents": 3,
+    "plannedNodes": 18,
+    "xmlChecked": true
+  }
+}
+```
+
+## bitmap_asset_provenance_report.json
+
+```json
+{
+  "ok": true,
+  "checkedAt": "2026-01-01T00:00:00Z",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "errors": [],
+  "warnings": [],
+  "summary": {
+    "assets": 20,
+    "icons": 7,
+    "scriptsScanned": 3
+  }
+}
+```
+
+## component_reuse_report.md
+
+```md
+# Component Reuse Report
+
+- result: PASS
+- stage: xml_generation
+
+## Errors
+- none
+
+## Warnings
+- none
 ```
 
 ## visual_part_coverage_report.json
@@ -601,6 +703,92 @@ Use this table whenever a parent component instance contains an external `<Butto
 - none
 ```
 
+## pipeline_stage_timings.json
+
+```json
+{
+  "version": "0.1.0",
+  "runId": "9efc07d8-cc4f-48fb-87c6-fcb4061395d4",
+  "pipeline": "fairygui-ui-pipeline",
+  "root": "UIProduction",
+  "status": "completed",
+  "startedAt": "2026-01-01T00:00:00Z",
+  "finishedAt": "2026-01-01T00:32:15Z",
+  "updatedAt": "2026-01-01T00:32:15Z",
+  "stages": [
+    {
+      "stageNumber": 1,
+      "stageId": "requirement_intake",
+      "name": "Requirement intake",
+      "defaultCategory": "active",
+      "status": "completed",
+      "attemptCount": 1,
+      "durationMs": 125000,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "completed",
+          "category": "active",
+          "startedAt": "2026-01-01T00:00:00Z",
+          "finishedAt": "2026-01-01T00:02:05Z",
+          "durationMs": 125000,
+          "notes": [],
+          "artifacts": ["specs/ui_spec.md"]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "wallClockDurationMs": 1935000,
+    "activeDurationMs": 1310000,
+    "waitingDurationMs": 480000,
+    "externalDurationMs": 90000,
+    "accountedDurationMs": 1880000,
+    "untrackedDurationMs": 55000,
+    "stageStatusCounts": {
+      "pending": 0,
+      "running": 0,
+      "completed": 15,
+      "skipped": 1,
+      "blocked": 0,
+      "failed": 0
+    },
+    "human": {
+      "wallClock": "00:32:15.000",
+      "active": "00:21:50.000",
+      "waiting": "00:08:00.000",
+      "external": "00:01:30.000",
+      "accounted": "00:31:20.000",
+      "untracked": "00:00:55.000"
+    }
+  }
+}
+```
+
+The real report contains all 16 canonical stage entries, including skipped stages and every rework attempt.
+
+## pipeline_stage_timings.md
+
+```md
+# Pipeline Stage Timing Report
+
+- pipeline: `fairygui-ui-pipeline`
+- run ID: `9efc07d8-cc4f-48fb-87c6-fcb4061395d4`
+- status: **COMPLETED**
+- total wall-clock: **00:32:15.000**
+- active processing: **00:21:50.000**
+- human waiting: **00:08:00.000**
+- external tools: **00:01:30.000**
+- untracked/idle: **00:00:55.000**
+
+## Stage Summary
+
+| # | Stage | Category | Status | Attempts | Duration | Started | Finished |
+|---:|---|---|---|---:|---:|---|---|
+| 1 | `requirement_intake` — Requirement intake | active | completed | 1 | 00:02:05.000 | 2026-01-01T00:00:00Z | 2026-01-01T00:02:05Z |
+| 5 | `design_approval` — Explicit human design approval | waiting | completed | 1 | 00:08:00.000 | 2026-01-01T00:07:00Z | 2026-01-01T00:15:00Z |
+```
+
 ## cut_report.json
 
 ```json
@@ -633,6 +821,9 @@ Use this table whenever a parent component instance contains an external `<Butto
   "resourceGeneration": true,
   "embeddedDocsIntegrity": true,
   "semanticControllerMapping": true,
+  "componentReuse": true,
+  "displayListZOrder": true,
+  "bitmapAssetProvenance": true,
   "visualPartCoverage": true,
   "designApproved": true,
   "packageName": "cooking",
@@ -680,8 +871,12 @@ Use this table whenever a parent component instance contains an external `<Butto
   "registry_loaded": true,
   "package_resource_paths_checked": true,
   "component_extension_overrides_checked": true,
+  "component_controller_parameters_checked": true,
   "semantic_controller_mapping_checked": true,
   "component_instance_configurations_checked": true,
+  "component_reuse_checked": true,
+  "display_list_z_order_checked": true,
+  "bitmap_asset_provenance_checked": true,
   "visual_part_coverage_checked": true,
   "error_count": 0,
   "warning_count": 0,

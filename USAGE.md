@@ -15,6 +15,67 @@
 8. 生成 FairyGUI 包结构、组件层级、Controller、Transition、Relation、Gear 和 Unity 绑定字段。
 9. 在 XML 严格模式下判断是否允许生成 `package.xml` 和组件 XML 草稿。
 10. 输出校验报告和 FairyGUI 编辑器导入检查清单。
+11. 输出总耗时、主动处理耗时、人工等待耗时、外部工具耗时，以及每个阶段的耗时和返工次数。
+
+## 阶段耗时记录
+
+完整流程开始前必须初始化计时：
+
+```bash
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction init
+```
+
+每个阶段开始和结束时分别记录：
+
+```bash
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  start --stage requirement_intake
+
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  finish --stage requirement_intake \
+  --status completed \
+  --artifact specs/ui_spec.md
+```
+
+不适用阶段必须显式标记，不能直接从报告中消失：
+
+```bash
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  skip --stage sheet_slicing \
+  --note "本次没有使用 Sprite Sheet"
+```
+
+设计稿发给用户后，结束 `design_mockup_generation`，立即开始 `design_approval`。这段跨会话时间会单独计入“人工等待”，不会混入主动生产耗时。等待期间可写临时报告：
+
+```bash
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction snapshot
+```
+
+流程结束后必须执行：
+
+```bash
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  finalize --status completed
+
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  validate
+```
+
+最终生成：
+
+```text
+reports/pipeline_stage_timings.json
+reports/pipeline_stage_timings.md
+```
+
+完整状态 `completed` 要求 16 个标准阶段全部为 `completed` 或 `skipped`。阻塞、失败或尚未完成的流程必须使用 `blocked`、`failed` 或 `partial`，不能伪装成完整流程。
+
+返工时使用 `--rework` 新增一次尝试，旧尝试和耗时必须保留。
 
 ## 重要原则
 
@@ -38,10 +99,17 @@ XML 不是默认产物。只有满足下面条件时才允许生成 XML：
 - 已读取 `references/fairygui-xml-contract.md`
 - 已读取 `references/xml-strict-generation.md`
 - 已读取 `references/semantic-controller-mapping-contract.md`
+- 已读取 `references/component-reuse-parameterization-contract.md`
 - 已读取 `references/component-instance-configuration-contract.md`
+- 已读取 `references/display-list-z-order-contract.md`
+- 已读取 `references/bitmap-icon-source-contract.md`
 - 已读取 `references/visual-part-coverage-contract.md`
 - 已读取 `references/package-resource-path-contract.md`
 - `validate_semantic_controller_mapping.py --stage xml_generation` 已通过
+- `validate_component_reuse.py --stage xml_generation` 已通过
+- `validate_display_list_z_order.py --stage xml_generation` 已通过
+- `validate_bitmap_asset_provenance.py --stage xml_generation` 已通过
+- `validate_visual_part_coverage.py --stage xml_generation` 已通过
 - 已有 `asset_manifest.json`
 - 已有 `fgui_id_registry.json`
 - 已有 `fgui_spec.md` 或明确的组件/displayList 计划
@@ -53,9 +121,13 @@ XML 不是默认产物。只有满足下面条件时才允许生成 XML：
 - 每个文件资源满足 `asset.file == package.outputPath/packageRelativeFile`
 - `package.xml path+name` 和组件 `fileName` 都能在包目录中精确找到文件
 - 外部 `<Button .../>` / `<Label .../>` 覆盖节点与目标组件 `extention` 一致，且标题、图标、声音 URL 均可验证
+- 每个复用组件都在 `component_state_map.components[].reusePlan` 和 `fgui_spec.md` Component Reuse Plan 中声明基组件、参数字段、子组件和允许的变体理由
+- 需要由父组件固定 Controller 页时，目标 Controller 设置 `exported="true"`，实例声明 `controllerParameters`，父 XML 精确写入 `controller="名称,页索引"`
+- Display List 已声明 `Z Layer` 与 `Occlusion Policy`；不透明背景位于 XML 最前部
+- 每个小图标都有合法 `assetSource`，且不是 Graph/SVG/字体/PIL 几何生成
 - 每个复用组件实例都在 `component_state_map.visualInstances` 和 `fgui_spec.md` Instance Configuration 中有明确配置
 - `component_visual_parts.json` 已记录设计稿中所有必需可见部件，并在 Manifest 或 XML 中声明实现
-- 语义不同的实例不能全部使用同一个未配置默认组件
+- 语义不同的实例不能全部使用同一个未配置默认组件，也不能仅因标题、图标、立绘、数值、颜色、尺寸或默认页不同就拆成多份同构 XML
 - 小图标、面板框、标题装饰、背景、分隔线和状态标记不能因为非交互或尺寸小而被静默省略
 - 变体组件默认 Controller 页必须匹配实例声明，编辑器预览不能直接显示未解析的 `@ui_...` Key
 
@@ -73,6 +145,18 @@ python scripts/validate_semantic_controller_mapping.py \
   --stage semantic_analysis \
   --out /path/to/UIProduction/reports/semantic_controller_mapping_report.json \
   --report-md /path/to/UIProduction/reports/semantic_controller_mapping_report.md
+
+python scripts/validate_component_reuse.py \
+  --root /path/to/UIProduction \
+  --stage semantic_analysis \
+  --out /path/to/UIProduction/reports/component_reuse_report.json \
+  --report-md /path/to/UIProduction/reports/component_reuse_report.md
+
+python scripts/validate_bitmap_asset_provenance.py \
+  --root /path/to/UIProduction \
+  --stage asset_planning \
+  --out /path/to/UIProduction/reports/bitmap_asset_provenance_report.json \
+  --report-md /path/to/UIProduction/reports/bitmap_asset_provenance_report.md
 
 python scripts/validate_visual_part_coverage.py \
   --root /path/to/UIProduction \
@@ -166,7 +250,7 @@ python scripts/record_design_approval.py \
 ### 生成 FairyGUI 拼装计划，不生成 XML
 
 ```text
-使用 fairygui-ui-pipeline skill，根据 ui_spec.md、component_state_map.json、component_visual_parts.json、asset_manifest.json 和切图目录，生成 fgui_spec.md、FairyGUI 包结构、组件层级、Controller、Gear、Instance Configuration、Visual Part Coverage、Transition、Relation 和 Unity 绑定字段。每个复用实例必须声明 xmlInstanceName、componentFile、configurationMode、Controller Pages、Preview Values 和 Runtime Bindings；每个必需视觉部件必须声明 Asset Name 或 XML Nodes。不要生成 XML。
+使用 fairygui-ui-pipeline skill，根据 ui_spec.md、component_state_map.json、component_visual_parts.json、asset_manifest.json 和切图目录，生成 fgui_spec.md、FairyGUI 包结构、组件层级、Component Reuse Plan、Controller、Gear、Instance Configuration、Visual Part Coverage、Transition、Relation 和 Unity 绑定字段。Display List 必须包含 Z Layer 与 Occlusion Policy，并按背景→内容→前景/遮罩排序。每个复用组件必须声明 reusePlan、基组件、可参数化字段和可复用子组件；每个复用实例必须声明 xmlInstanceName、componentFile、configurationMode、Controller Pages、Controller Parameters、Preview Values 和 Runtime Bindings。可导出的 Controller 优先通过父实例 controller="名称,页索引" 传入。标题、图标、立绘、数值、颜色、尺寸或默认页差异不能单独构成 variant_component。每个小图标必须来自审核位图并声明 assetSource，禁止 Graph/SVG/字体/PIL 几何替代。不要生成 XML。
 ```
 
 ### 暂存完整 FairyGUI 包资源
@@ -211,7 +295,10 @@ Manifest 必须区分：
 - references/fairygui-xml-parsing-specification.md
 - references/fairygui-xml-contract.md
 - references/semantic-controller-mapping-contract.md
+- references/component-reuse-parameterization-contract.md
 - references/component-instance-configuration-contract.md
+- references/display-list-z-order-contract.md
+- references/bitmap-icon-source-contract.md
 - references/visual-part-coverage-contract.md
 - references/package-resource-path-contract.md
 - references/xml-strict-generation.md
@@ -261,8 +348,16 @@ UIProduction/
     ├── design_gate_blocking_report.md
     ├── semantic_controller_mapping_report.json
     ├── semantic_controller_mapping_report.md
+    ├── component_reuse_report.json
+    ├── component_reuse_report.md
+    ├── display_list_z_order_report.json
+    ├── display_list_z_order_report.md
+    ├── bitmap_asset_provenance_report.json
+    ├── bitmap_asset_provenance_report.md
     ├── visual_part_coverage_report.json
     ├── visual_part_coverage_report.md
+    ├── pipeline_stage_timings.json
+    ├── pipeline_stage_timings.md
     ├── cut_report.json
     ├── xml_readiness_report.json
     ├── xml_blocking_report.md
@@ -318,6 +413,57 @@ python scripts/validate_semantic_controller_mapping.py \
 
 ```bash
 --xml-dir /path/to/UIProduction/fgui_xml/cooking
+```
+
+Display List 层级校验：
+
+```bash
+python scripts/validate_display_list_z_order.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --xml-dir /path/to/UIProduction/fgui_xml/cooking \
+  --out /path/to/UIProduction/reports/display_list_z_order_report.json \
+  --report-md /path/to/UIProduction/reports/display_list_z_order_report.md
+```
+
+阶段耗时记录与校验：
+
+```bash
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction init
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction start --stage requirement_intake
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction finish --stage requirement_intake --status completed
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction finalize --status completed
+python scripts/record_pipeline_timing.py --root /path/to/UIProduction validate
+```
+
+命令型阶段可以自动包裹计时：
+
+```bash
+python scripts/record_pipeline_timing.py \
+  --root /path/to/UIProduction \
+  run --stage validation -- \
+  python scripts/validate_pipeline.py --root /path/to/UIProduction
+```
+
+图标位图来源校验：
+
+```bash
+python scripts/validate_bitmap_asset_provenance.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --out /path/to/UIProduction/reports/bitmap_asset_provenance_report.json \
+  --report-md /path/to/UIProduction/reports/bitmap_asset_provenance_report.md
+```
+
+组件复用与参数化校验：
+
+```bash
+python scripts/validate_component_reuse.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --xml-dir /path/to/UIProduction/fgui_xml/cooking \
+  --out /path/to/UIProduction/reports/component_reuse_report.json \
+  --report-md /path/to/UIProduction/reports/component_reuse_report.md
 ```
 
 视觉部件覆盖校验：
@@ -387,11 +533,16 @@ run_tests.cmd
 - `fgui_id_registry.json` 负责稳定 ID，重跑时不能全部随机。
 - `references/fairygui-ai-generation-workflow.md` 和 `references/fairygui-xml-parsing-specification.md` 是随 Skill 一起迁移的完整原文，不允许只按摘要、桥接文件或外部路径生成。
 - `references/semantic-controller-mapping-contract.md` 负责把需求状态、设计语义、状态归属、Controller 页面、Gear 目标、外部 Button/Label 实例参数和 XML 实现串成同一条可校验链路。
-- `references/component-instance-configuration-contract.md` 负责防止不同语义的复用实例全部落到同一个默认页面，并约束变体组件、外部覆盖、运行时绑定和可读预览文本。
+- `references/component-reuse-parameterization-contract.md` 负责优先合并同构组件、声明基组件与参数字段、抽取可复用子组件，并阻止内容差异被错误拆成 XML 变体。
+- `references/display-list-z-order-contract.md` 负责约束 FairyGUI XML 从后到前的绘制顺序，防止背景或大组件放在后部覆盖内容。
+- `references/bitmap-icon-source-contract.md` 负责禁止矢量/程序化图标替代，要求小图标来自审核位图并保留来源证据。
+- `references/component-instance-configuration-contract.md` 负责防止不同语义的复用实例全部落到同一个默认页面，并约束外部覆盖、Controller 页面、运行时绑定、结构性变体和可读预览文本。
 - `references/visual-part-coverage-contract.md` 负责把确认设计稿里的每个必需可见部件映射到 Manifest 和 XML；角色名、部件角色和项目业务名称全部来自项目文件，不在 Skill 中写死。
+- `references/pipeline-stage-timing-contract.md` 负责标准阶段编号、主动/等待/外部时间分类、返工尝试保留和最终耗时报告；流程开始前必须初始化，结束后必须 finalize 与 validate。
 - `references/xml-strict-generation.md` 是 XML 生成前的章节覆盖清单，不允许跳过。
 - imagegen 和 FairyGUI XML 都要经过人工检查点。
-- XML 生成顺序必须是：注册并冻结 ID → 暂存完整包资源 → 校验包内路径 → `package.xml` → 叶子组件 → 组合组件 → 主界面。
+- XML 生成顺序必须是：注册并冻结 ID → 暂存完整包资源 → 校验包内路径 → `package.xml` → 可参数化叶子/子组件 → 基础复合组件 → 经结构校验允许的变体 → 主界面。
 - 每次生成前写入 `reports/xml_generation_input_snapshot.json`，防止生成期间 Manifest 或 Registry 被悄悄修改。
 - XML 草稿必须经过 FairyGUI 编辑器打开、按设计分辨率截图并与确认设计稿对照、发布、Unity 加载测试后，才算最终可用。
 - 视觉对照必须确认没有重复默认头像/图标、空白按钮、白色占位块、原始本地化 Key 或漏掉的实例状态。
+- 最终交付必须输出每个标准阶段的状态、尝试次数和耗时，并分别汇总总墙钟时间、主动处理时间、人工等待时间、外部工具时间和未跟踪时间。

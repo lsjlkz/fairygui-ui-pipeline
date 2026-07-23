@@ -30,6 +30,8 @@ MODE_TAGS = {
     "none": set(),
 }
 RAW_LOCALIZATION_RE = re.compile(r"^@(?:ui_|loc:|i18n:)", re.IGNORECASE)
+ICON_ROLE_RE = re.compile(r"(?:^|[_\-])(icon|badge|crest|emblem)(?:$|[_\-])", re.IGNORECASE)
+ICON_IMPLEMENTATION_MODES = {"asset_image", "runtime_loader", "child_component"}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -283,6 +285,17 @@ def validate_structure(
 
             if mode not in IMPLEMENTATION_MODES:
                 add(report, "errors", "visual_part_mode_invalid", f"{component_type}.{part_id}.implementation.mode 非法: {mode}", coverage_path)
+            asset = manifest_index.get(normalized(asset_name)) if isinstance(asset_name, str) else None
+            asset_type = str(asset.get("type", "")).lower() if isinstance(asset, dict) else ""
+            asset_layer = str((asset.get("fgui") or {}).get("layer", "")).lower() if isinstance(asset, dict) and isinstance(asset.get("fgui"), dict) else ""
+            icon_like = (
+                bool(ICON_ROLE_RE.search(str(part_id)))
+                or bool(ICON_ROLE_RE.search(str(role)))
+                or asset_type == "icon"
+                or asset_layer == "icon"
+            )
+            if icon_like and mode not in ICON_IMPLEMENTATION_MODES:
+                add(report, "errors", "icon_visual_part_graph_forbidden", f"{component_type}.{part_id} 是图标类视觉部件，禁止使用 {mode}；必须使用审核后的位图或位图子组件", coverage_path)
             if fallback_policy not in FALLBACK_POLICIES:
                 add(report, "errors", "visual_part_fallback_policy_invalid", f"{component_type}.{part_id}.fallbackPolicy 非法: {fallback_policy}", coverage_path)
             if node_match not in NODE_MATCH:

@@ -20,7 +20,7 @@ requirement document
 -> XML draft
 ```
 
-The semantic pass owns meaning, purpose, state, component reuse, and runtime responsibility. The layout pass owns coordinates and spatial hierarchy.
+The semantic pass owns meaning, purpose, state, component reuse, parameterization strategy, and runtime responsibility. The layout pass owns coordinates and spatial hierarchy. Read `references/component-reuse-parameterization-contract.md` before assigning component files.
 
 ## Required Project Files
 
@@ -38,7 +38,9 @@ Include:
 - requirement sources, `design_approval.json`, and the exact approved design image source
 - screen goal and player/user flow
 - UI part inventory: each visible area, what it is, what it does, and which requirement it supports
-- component reuse notes: when multiple visible objects are the same component class in different states or slots
+- component reuse notes: when multiple visible objects are the same component class in different states or slots; record whether fixed instance states can be passed through an exported Controller
+- parameterization notes: which title, icon, portrait, value, color, size, Controller page, or runtime field differences stay on one base component
+- reusable child-component notes for repeated icon-plus-value, icon-plus-title, badge, row, slot, or panel-shell structures
 - state model: component, state/page, trigger, visual difference, runtime owner
 - ownership split: business state owner, FGUI visual state owner, and dynamic-data owner
 - Controller decision: whether discrete states belong to an FGUI Controller, and why
@@ -78,6 +80,7 @@ Component fields:
 - `controllers`: required FGUI controllers, or an empty list only when visual state is runtime-only/static.
 - `requirementIds`: requirement/design-document clauses that justify the component and states.
 - `reusable`: boolean.
+- `reusePlan`: required when reusable; declares `strategy`, `baseComponentFile`, `extension`, `parameterizableFields`, `childComponentFiles`, and `variantReasons`. Exported Controller parameters use `controller.<name>` fields.
 
 Visual instance fields:
 
@@ -105,8 +108,8 @@ State group fields:
 `layout_spec.json` must reference semantic output:
 
 - every `region` should link to a semantic purpose or requirement group
-- every `object` should include `semanticId`, `componentType`, `instanceId`, and `stateVariant` when it is not pure decoration
-- every `slot` should include `componentType`, `slotRole`, `stateOwner`, and `runtimeRole`
+- every `object` should include `semanticId`, `componentType`, `instanceId`, `stateVariant`, `zLayer`, and `occlusionPolicy` when it is not pure decoration
+- every `slot` should include `componentType`, `slotRole`, `stateOwner`, `runtimeRole`, `zLayer`, and `occlusionPolicy`
 
 If a design shows two copies of the same component in different states, create two visual instances with the same `componentType` and different `instanceId` / `stateVariant`. Do not create two unrelated component types.
 
@@ -144,14 +147,18 @@ Before layout:
 
 - requirement documents, UI/UX design documents, and the exact approved design image must all be considered
 - semantic component reuse must be identified
+- reusable components must declare `reusePlan`; data-only differences must not become separate component files
+- repeated stable substructures should be identified as reusable child components
 - obvious visible states and requirement-defined non-visible states must be mapped to component state models
 - state ownership must separate business state, visual state, and continuous runtime data
 - multi-state components visually owned by `FGUI` or `Mixed` must declare Controller mappings
 - run `scripts/validate_semantic_controller_mapping.py --stage layout_analysis`
+- run `scripts/validate_component_reuse.py --stage semantic_analysis`
 
 Before XML:
 
 - `uxui_semantic_spec.md`, `component_state_map.json`, `layout_spec.json`, `slice_plan.json`, `asset_manifest.json`, `fgui_id_registry.json`, and `fgui_spec.md` must agree
 - component states must map to controllers/gears or explicit runtime code ownership
 - `scripts/validate_semantic_controller_mapping.py --stage xml_generation` must pass
+- `scripts/validate_component_reuse.py --stage xml_generation` must pass
 - mismatches must be resolved or recorded as accepted risk

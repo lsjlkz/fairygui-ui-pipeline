@@ -29,6 +29,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
+from validate_component_reuse import validate as validate_component_reuse
+from validate_display_list_z_order import validate as validate_display_list_z_order
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
@@ -292,6 +295,88 @@ def resolve_package_component_file(package_root: Path, resource_id: str) -> str 
         relative = f"{path_attr.strip('/')}/{name}".strip("/")
         return normalize_path(relative) if relative else None
     return None
+
+
+def validate_component_controller_parameter(
+    source_file: Path,
+    component_instance: ET.Element,
+    mode: str,
+    current_package_id: str | None,
+    package_root: Path,
+    issues: list[dict[str, str]],
+) -> None:
+    encoded = component_instance.attrib.get("controller")
+    if not encoded:
+        return
+    parts = [part.strip() for part in encoded.split(",")]
+    if len(parts) != 2 or not parts[0]:
+        issues.append(issue("error", source_file, f"component@controller 格式错误，应为 name,pageIndex: {encoded}"))
+        return
+    controller_name, page_index_text = parts
+    try:
+        page_index = int(page_index_text)
+    except ValueError:
+        issues.append(issue("error", source_file, f"component@controller 页索引必须是整数: {encoded}"))
+        return
+    if page_index < 0:
+        issues.append(issue("error", source_file, f"component@controller 页索引不能为负数: {encoded}"))
+        return
+
+    target_pkg = component_instance.attrib.get("pkg")
+    if target_pkg and target_pkg != current_package_id:
+        add_mode_issue(
+            issues,
+            mode,
+            source_file,
+            f"跨包 component@controller 暂无法解析目标 Controller: pkg={target_pkg}, value={encoded}",
+        )
+        return
+
+    src = component_instance.attrib.get("src", "")
+    file_name = component_instance.attrib.get("fileName", "")
+    if not src or not file_name:
+        issues.append(issue("error", source_file, "带 controller 参数的 component 实例必须同时声明 src 和 fileName"))
+        return
+    registered_file = resolve_package_component_file(package_root, src)
+    if registered_file is None:
+        issues.append(issue("error", source_file, f"component@controller 的 src 未在 package.xml 注册为组件: {src}"))
+        return
+    if normalize_path(file_name) != registered_file:
+        issues.append(issue("error", source_file, f"component@controller 的 fileName 与 package.xml 不一致: XML={file_name}, package={registered_file}"))
+        return
+    target_file = package_root / normalize_relative_path(registered_file)
+    if not target_file.is_file():
+        issues.append(issue("error", source_file, f"component@controller 目标 XML 不存在: {target_file}"))
+        return
+    try:
+        target_root = ET.parse(target_file).getroot()
+    except (OSError, ET.ParseError) as exc:
+        issues.append(issue("error", source_file, f"component@controller 目标 XML 无法解析: {target_file}: {exc}"))
+        return
+
+    controller = next(
+        (
+            element for element in target_root.iter()
+            if element.tag == "controller" and element.attrib.get("name") == controller_name
+        ),
+        None,
+    )
+    if controller is None:
+        issues.append(issue("error", source_file, f"component@controller 引用的 Controller 不存在: {controller_name}"))
+        return
+    if controller.attrib.get("exported", "").lower() != "true":
+        issues.append(issue("error", source_file, f"component@controller 引用的 Controller 未设置 exported=\"true\": {controller_name}"))
+        return
+
+    page_tokens = [token.strip() for token in controller.attrib.get("pages", "").split(",") if token.strip()]
+    if len(page_tokens) % 2 == 0 and page_tokens and all(page_tokens[index].isdigit() for index in range(0, len(page_tokens), 2)):
+        page_names = page_tokens[1::2]
+    else:
+        page_names = page_tokens
+    if not page_names:
+        issues.append(issue("error", source_file, f"导出的 Controller 没有页面: {controller_name}"))
+    elif page_index >= len(page_names):
+        issues.append(issue("error", source_file, f"component@controller 页索引越界: {encoded}, pageCount={len(page_names)}"))
 
 
 def validate_component_extension_overrides(
@@ -607,6 +692,14 @@ def validate_component_element(
             issues.append(issue("error", path, f"<{elem.tag}> 缺少 name"))
 
     if elem.tag == "component":
+        validate_component_controller_parameter(
+            path,
+            elem,
+            mode,
+            current_package_id,
+            package_root,
+            issues,
+        )
         validate_component_extension_overrides(
             path,
             elem,
@@ -857,6 +950,9 @@ def main() -> int:
         )
 
     semantic_controller_mapping_checked = False
+    component_reuse_checked = False
+    display_list_z_order_checked = False
+    bitmap_asset_provenance_checked = False
     visual_part_coverage_checked = False
     project_root = manifest_info.get("project_root")
     production = manifest.get("production", {}) if isinstance(manifest, dict) else {}
@@ -882,6 +978,49 @@ def main() -> int:
         for item in semantic_report.get("warnings", []):
             item_path = Path(item["path"]) if item.get("path") else xml_dir
             all_issues.append(issue("warning", item_path, f"semantic controller mapping [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
+    requires_component_reuse = (
+        isinstance(project_root, Path)
+        and (
+            (project_root / "specs" / "component_state_map.json").is_file()
+            or (
+                isinstance(production, dict)
+                and (
+                    production.get("generateFullScreenDesign") is True
+                    or production.get("requiresDesignApproval") is True
+                )
+            )
+        )
+    )
+    if requires_component_reuse and isinstance(project_root, Path):
+        component_reuse_checked = True
+        component_reuse_report = validate_component_reuse(project_root, "xml_generation", xml_dir)
+        for item in component_reuse_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"component reuse [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in component_reuse_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"component reuse [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
+    if isinstance(project_root, Path):
+        bitmap_asset_provenance_checked = True
+        provenance_report = validate_bitmap_asset_provenance(project_root, "xml_generation")
+        for item in provenance_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"bitmap asset provenance [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in provenance_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"bitmap asset provenance [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
+        if (project_root / "specs" / "fgui_spec.md").is_file():
+            display_list_z_order_checked = True
+            z_order_report = validate_display_list_z_order(project_root, "xml_generation", xml_dir)
+            for item in z_order_report.get("errors", []):
+                item_path = Path(item["path"]) if item.get("path") else xml_dir
+                all_issues.append(issue("error", item_path, f"display list z-order [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+            for item in z_order_report.get("warnings", []):
+                item_path = Path(item["path"]) if item.get("path") else xml_dir
+                all_issues.append(issue("warning", item_path, f"display list z-order [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
 
     requires_visual_part_coverage = (
         isinstance(project_root, Path)
@@ -916,8 +1055,12 @@ def main() -> int:
         "registry_loaded": bool(registry),
         "package_resource_paths_checked": True,
         "component_extension_overrides_checked": True,
+        "component_controller_parameters_checked": True,
         "semantic_controller_mapping_checked": semantic_controller_mapping_checked,
         "component_instance_configurations_checked": semantic_controller_mapping_checked,
+        "component_reuse_checked": component_reuse_checked,
+        "display_list_z_order_checked": display_list_z_order_checked,
+        "bitmap_asset_provenance_checked": bitmap_asset_provenance_checked,
         "visual_part_coverage_checked": visual_part_coverage_checked,
         "error_count": sum(1 for item in all_issues if item["level"] == "error"),
         "warning_count": sum(1 for item in all_issues if item["level"] == "warning"),

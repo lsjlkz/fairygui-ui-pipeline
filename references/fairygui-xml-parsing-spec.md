@@ -8,7 +8,7 @@
 references/fairygui-xml-parsing-specification.md
 ```
 
-The complete embedded specification includes Button/Label component-instance external parameter overrides for titles, icons, selected-state values, target `extention` matching, allowed-attribute checks, and `ui://` URL validation.
+The complete embedded specification includes Button/Label component-instance external parameter overrides for titles, icons, selected-state values, target `extention` matching, allowed-attribute checks, and `ui://` URL validation. Skill-level production policies are defined separately: reuse and exported Controller parameters in `references/component-reuse-parameterization-contract.md` / `references/component-instance-configuration-contract.md`, back-to-front XML ordering in `references/display-list-z-order-contract.md`, and bitmap-only icon provenance in `references/bitmap-icon-source-contract.md`.
 
 完整的 AI 自动生成流程原文位于：
 

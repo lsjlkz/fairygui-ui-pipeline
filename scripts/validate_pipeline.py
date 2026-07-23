@@ -11,6 +11,9 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
+from validate_component_reuse import validate as validate_component_reuse
+from validate_display_list_z_order import validate as validate_display_list_z_order
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
 
@@ -500,6 +503,25 @@ def main() -> int:
                         item.get("path", str(project_root)),
                     )
 
+                state_map_path = project_root / "specs" / "component_state_map.json"
+                if state_map_path.is_file():
+                    reuse_stage = "fairygui_assembly" if (project_root / "specs" / "fgui_spec.md").is_file() else "semantic_analysis"
+                    component_reuse_report = validate_component_reuse(project_root, reuse_stage)
+                    for item in component_reuse_report.get("errors", []):
+                        add(
+                            report,
+                            "errors",
+                            "component reuse: " + item.get("message", "invalid"),
+                            item.get("path", str(project_root)),
+                        )
+                    for item in component_reuse_report.get("warnings", []):
+                        add(
+                            report,
+                            "warnings",
+                            "component reuse: " + item.get("message", "warning"),
+                            item.get("path", str(project_root)),
+                        )
+
                 visual_part_report = validate_visual_part_coverage(project_root, "asset_planning")
                 for item in visual_part_report.get("errors", []):
                     add(
@@ -515,6 +537,67 @@ def main() -> int:
                         "visual part coverage: " + item.get("message", "warning"),
                         item.get("path", str(project_root)),
                     )
+
+    if manifest and args.root:
+        project_root = args.root.resolve()
+        production = manifest.get("production", {})
+        requires_design_approval = isinstance(production, dict) and (
+            production.get("generateFullScreenDesign") is True
+            or production.get("requiresDesignApproval") is True
+        )
+        state_map_path = project_root / "specs" / "component_state_map.json"
+        if state_map_path.is_file() and not requires_design_approval:
+            reuse_stage = "fairygui_assembly" if (project_root / "specs" / "fgui_spec.md").is_file() else "semantic_analysis"
+            component_reuse_report = validate_component_reuse(project_root, reuse_stage)
+            for item in component_reuse_report.get("errors", []):
+                add(
+                    report,
+                    "errors",
+                    "component reuse: " + item.get("message", "invalid"),
+                    item.get("path", str(project_root)),
+                )
+            for item in component_reuse_report.get("warnings", []):
+                add(
+                    report,
+                    "warnings",
+                    "component reuse: " + item.get("message", "warning"),
+                    item.get("path", str(project_root)),
+                )
+
+    if manifest and args.root:
+        project_root = args.root.resolve()
+        provenance_report = validate_bitmap_asset_provenance(project_root, "asset_planning")
+        for item in provenance_report.get("errors", []):
+            add(
+                report,
+                "errors",
+                "bitmap asset provenance: " + item.get("message", "invalid"),
+                item.get("path", str(project_root)),
+            )
+        for item in provenance_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "bitmap asset provenance: " + item.get("message", "warning"),
+                item.get("path", str(project_root)),
+            )
+
+        if (project_root / "specs" / "fgui_spec.md").is_file():
+            z_order_report = validate_display_list_z_order(project_root, "fairygui_assembly")
+            for item in z_order_report.get("errors", []):
+                add(
+                    report,
+                    "errors",
+                    "display list z-order: " + item.get("message", "invalid"),
+                    item.get("path", str(project_root)),
+                )
+            for item in z_order_report.get("warnings", []):
+                add(
+                    report,
+                    "warnings",
+                    "display list z-order: " + item.get("message", "warning"),
+                    item.get("path", str(project_root)),
+                )
 
     if manifest and not args.skip_image_metadata:
         project_root = args.root.resolve() if args.root else (manifest_path.parent.parent.resolve() if manifest_path else None)

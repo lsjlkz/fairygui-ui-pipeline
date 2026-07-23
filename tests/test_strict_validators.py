@@ -157,6 +157,9 @@ class StrictValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("semantic controller mapping [xml_gear_missing]", result.stdout)
             self.assertIn('"semantic_controller_mapping_checked": true', result.stdout)
+            self.assertIn('"component_reuse_checked": true', result.stdout)
+            self.assertIn('"display_list_z_order_checked": true', result.stdout)
+            self.assertIn('"bitmap_asset_provenance_checked": true', result.stdout)
 
     def create_project(self, root: Path, *, instance_id: str = "n0_3qpk") -> tuple[Path, Path]:
         specs = root / "specs"
@@ -182,9 +185,9 @@ class StrictValidatorTests(unittest.TestCase):
 | cooking_view | cooking_view.xml |
 
 ## Display List
-| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Binding |
-|---|---:|---|---|---|---|---|---|---|---|
-| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | bgMain |
+| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Z Layer | Occlusion Policy | Binding |
+|---|---:|---|---|---|---|---|---|---|---|---|---|
+| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | background | opaque_background | bgMain |
 
 ## Layout Region Table
 | Region | Parent |
@@ -362,6 +365,14 @@ class StrictValidatorTests(unittest.TestCase):
                     "states": ["idle", "ready"],
                     "controllers": ["state"],
                     "reusable": True,
+                    "reusePlan": {
+                        "strategy": "single_component",
+                        "baseComponentFile": "equipment_slot.xml",
+                        "extension": "none",
+                        "parameterizableFields": ["controller.state", "runtime.foodId", "runtime.state"],
+                        "childComponentFiles": [],
+                        "variantReasons": [],
+                    },
                     "requirementIds": ["REQ-EQUIPMENT-STATE"],
                 }
             ],
@@ -453,6 +464,8 @@ class StrictValidatorTests(unittest.TestCase):
                     "binding": "equipmentSlotLeft",
                     "stateOwner": "FGUI",
                     "runtimeRole": "cook_source",
+                    "zLayer": "content",
+                    "occlusionPolicy": "normal",
                     "requirementIds": ["REQ-EQUIPMENT-STATE"],
                     "slicePolicy": "use_component",
                 }
@@ -508,10 +521,10 @@ class StrictValidatorTests(unittest.TestCase):
 | equipment_slot | equipment_slot.xml | none | true | cooking equipment state component |
 
 ## Display List
-| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Binding |
-|---|---:|---|---|---|---|---|---|---|---|
-| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | bgMain |
-| cooking_view | 1 | equipment_slot_left | component | none | equipment_slot | 100,200 | 320,280 | layout_spec.bbox | equipmentSlotLeft |
+| Parent | Order | Name | Node Type | Asset Name | Resource | Position | Size | Size Source | Z Layer | Occlusion Policy | Binding |
+|---|---:|---|---|---|---|---|---|---|---|---|---|
+| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | background | opaque_background | bgMain |
+| cooking_view | 1 | equipment_slot_left | component | none | equipment_slot | 100,200 | 320,280 | layout_spec.bbox | content | normal | equipmentSlotLeft |
 
 ## Layout Region Table
 | Region | Parent | Bounds | Anchor / Relation | Type | Interaction Responsibility |
@@ -528,10 +541,15 @@ class StrictValidatorTests(unittest.TestCase):
 |---|---|---|
 | equipment state visuals | equipment_slot | cooking_view |
 
+## Component Reuse Plan
+| Component Type | Strategy | Base Component File | Extension | Parameterizable Fields | Child Components | Variant Reasons | Requirement IDs |
+|---|---|---|---|---|---|---|---|
+| EquipmentSlot | single_component | equipment_slot.xml | none | controller.state,runtime.foodId,runtime.state | none | none | REQ-EQUIPMENT-STATE |
+
 ## Controllers
-| Component | Controller | Pages | Default | Used By | Requirement IDs | State Owner |
-|---|---|---|---|---|---|---|
-| equipment_slot | state | {pages} | idle | highlight_ready | REQ-EQUIPMENT-STATE | FGUI |
+| Component | Controller | Pages | Default | Exported | Used By | Requirement IDs | State Owner |
+|---|---|---|---|---|---|---|---|
+| equipment_slot | state | {pages} | idle | false | highlight_ready | REQ-EQUIPMENT-STATE | FGUI |
 
 ## Gear Mapping Table
 | Component | Controller | Page | Gear Target | Gear Type | Result | Requirement IDs |
@@ -576,6 +594,14 @@ class StrictValidatorTests(unittest.TestCase):
         specs = root / "specs"
         state_map_path = specs / "component_state_map.json"
         state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+        state_map["components"][0]["reusePlan"] = {
+            "strategy": "variant_allowed",
+            "baseComponentFile": "equipment_slot.xml",
+            "extension": "none",
+            "parameterizableFields": ["controller.state", "runtime.foodId", "runtime.state"],
+            "childComponentFiles": [],
+            "variantReasons": ["structural_difference"],
+        }
         state_map["visualInstances"] = [
             {
                 "instanceId": "equipment_slot_left_01",
@@ -590,6 +616,10 @@ class StrictValidatorTests(unittest.TestCase):
                     "componentFile": "equipment_slot_ready.xml",
                     "previewValues": {"state": "ready", "title": "READY"},
                     "runtimeBindings": ["foodId", "state"],
+                    "variantJustification": {
+                        "reason": "structural_difference",
+                        "structuralDifferences": ["The ready preview contains an additional title node."],
+                    },
                 },
             }
         ]
@@ -597,11 +627,15 @@ class StrictValidatorTests(unittest.TestCase):
 
         fgui_spec_path = specs / "fgui_spec.md"
         fgui_spec = fgui_spec_path.read_text(encoding="utf-8")
+        fgui_spec = fgui_spec.replace(
+            "| EquipmentSlot | single_component | equipment_slot.xml | none | controller.state,runtime.foodId,runtime.state | none | none | REQ-EQUIPMENT-STATE |",
+            "| EquipmentSlot | variant_allowed | equipment_slot.xml | none | controller.state,runtime.foodId,runtime.state | none | structural_difference | REQ-EQUIPMENT-STATE |",
+        )
         instance_table = """## Instance Configuration
 
-| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
-|---|---|---|---|---|---|---|---|---|---|
-| equipment_slot_left_01 | equipment_slot_left | EquipmentSlot | equipment_slot_ready.xml | variant_component | state=ready | none | state=ready,title=READY | foodId,state | REQ-EQUIPMENT-STATE |
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Controller Parameters | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| equipment_slot_left_01 | equipment_slot_left | EquipmentSlot | equipment_slot_ready.xml | variant_component | state=ready | none | none | state=ready,title=READY | foodId,state | REQ-EQUIPMENT-STATE |
 
 """
         fgui_spec = fgui_spec.replace("## Transitions", instance_table + "## Transitions")
@@ -733,6 +767,482 @@ class StrictValidatorTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("xml_preview_raw_localization_key", result.stdout)
+
+    def test_component_reuse_single_component_plan_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "fairygui_assembly",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"ok": true', result.stdout)
+
+    def test_component_reuse_plan_missing_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            del state_map["components"][0]["reusePlan"]
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "semantic_analysis",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("component_reuse_plan_missing", result.stdout)
+
+    def test_single_component_cannot_use_variant_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            state_map["visualInstances"] = [
+                {
+                    "instanceId": "slot_ready",
+                    "componentType": "EquipmentSlot",
+                    "xmlInstanceName": "slot_ready",
+                    "stateVariant": "ready",
+                    "controllerPages": {"state": "ready"},
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "implementation": {
+                        "configurationMode": "variant_component",
+                        "componentFile": "equipment_slot_ready.xml",
+                        "previewValues": {"state": "ready"},
+                        "runtimeBindings": ["state"],
+                    },
+                }
+            ]
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "semantic_analysis",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("variant_component_forbidden_by_reuse_plan", result.stdout)
+
+    def test_extension_override_field_must_be_declared(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            state_map["components"][0]["reusePlan"]["extension"] = "Label"
+            state_map["components"][0]["reusePlan"]["parameterizableFields"] = ["Label.title"]
+            state_map["visualInstances"] = [
+                {
+                    "instanceId": "slot_ready",
+                    "componentType": "EquipmentSlot",
+                    "xmlInstanceName": "slot_ready",
+                    "stateVariant": "ready",
+                    "controllerPages": {"state": "ready"},
+                    "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                    "implementation": {
+                        "configurationMode": "extension_override",
+                        "componentFile": "equipment_slot.xml",
+                        "extensionParameters": {
+                            "Label": {"title": "READY", "icon": "ui://qdf53qpkabc12"}
+                        },
+                        "previewValues": {"state": "ready"},
+                        "runtimeBindings": ["state"],
+                    },
+                }
+            ]
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "semantic_analysis",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("extension_parameter_not_declared", result.stdout)
+
+    def test_xml_extension_override_field_must_be_declared(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            state_map["components"][0]["reusePlan"]["extension"] = "Label"
+            state_map["components"][0]["reusePlan"]["parameterizableFields"] = ["Label.title"]
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            fgui_spec_path = root / "specs" / "fgui_spec.md"
+            fgui_spec = fgui_spec_path.read_text(encoding="utf-8").replace(
+                "| EquipmentSlot | single_component | equipment_slot.xml | none | controller.state,runtime.foodId,runtime.state | none | none | REQ-EQUIPMENT-STATE |",
+                "| EquipmentSlot | single_component | equipment_slot.xml | Label | Label.title | none | none | REQ-EQUIPMENT-STATE |",
+            )
+            fgui_spec_path.write_text(fgui_spec, encoding="utf-8")
+
+            xml_dir = root / "fgui_xml" / "cooking"
+            xml_dir.mkdir(parents=True, exist_ok=True)
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280" extention="Label"><displayList/></component>
+""",
+                encoding="utf-8",
+            )
+            (xml_dir / "cooking_view.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="1920,1080"><displayList>
+  <component id="n0_3qpk" name="slot" src="slot1" fileName="equipment_slot.xml" xy="0,0" size="320,280">
+    <Label title="READY" icon="ui://qdf53qpkabc12"/>
+  </component>
+</displayList></component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_extension_parameter_not_declared", result.stdout)
+
+    def test_duplicate_variant_structure_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_instance_configuration_fixture(root, selected_page=1)
+            base_xml = (xml_dir / "equipment_slot.xml").read_text(encoding="utf-8")
+            renamed_duplicate = base_xml.replace("highlight_ready", "renamed_highlight")
+            (xml_dir / "equipment_slot_ready.xml").write_text(renamed_duplicate, encoding="utf-8")
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("duplicate_variant_structure_should_reuse_base", result.stdout)
+
+    def test_composite_component_must_reference_declared_child(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            state_map_path = root / "specs" / "component_state_map.json"
+            state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+            state_map["components"][0]["reusePlan"] = {
+                "strategy": "composite_component",
+                "baseComponentFile": "equipment_slot.xml",
+                "extension": "none",
+                "parameterizableFields": ["controller.state"],
+                "childComponentFiles": ["stat_item.xml"],
+                "variantReasons": [],
+            }
+            state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            fgui_spec_path = root / "specs" / "fgui_spec.md"
+            fgui_spec = fgui_spec_path.read_text(encoding="utf-8").replace(
+                "| EquipmentSlot | single_component | equipment_slot.xml | none | controller.state,runtime.foodId,runtime.state | none | none | REQ-EQUIPMENT-STATE |",
+                "| EquipmentSlot | composite_component | equipment_slot.xml | none | controller.state | stat_item.xml | none | REQ-EQUIPMENT-STATE |",
+            )
+            fgui_spec_path.write_text(fgui_spec, encoding="utf-8")
+
+            xml_dir = root / "fgui_xml" / "cooking"
+            xml_dir.mkdir(parents=True, exist_ok=True)
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280"><displayList/></component>
+""",
+                encoding="utf-8",
+            )
+            (xml_dir / "stat_item.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="120,40" extention="Label"><displayList/></component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_component_reuse.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("composite_child_reuse_plan_missing", result.stdout)
+            self.assertIn("composite_child_not_referenced", result.stdout)
+
+    def add_exported_controller_fixture(
+        self,
+        root: Path,
+        *,
+        exported: bool = True,
+        parent_encoding: str = "state,1",
+    ) -> Path:
+        self.add_semantic_controller_specs(root)
+        state_map_path = root / "specs" / "component_state_map.json"
+        state_map = json.loads(state_map_path.read_text(encoding="utf-8"))
+        state_map["visualInstances"] = [
+            {
+                "instanceId": "equipment_slot_left_01",
+                "componentType": "EquipmentSlot",
+                "xmlInstanceName": "equipment_slot_left",
+                "stateVariant": "ready",
+                "controllerPages": {"state": "ready"},
+                "slotRole": "cook_source",
+                "requirementIds": ["REQ-EQUIPMENT-STATE"],
+                "implementation": {
+                    "configurationMode": "controller_pages",
+                    "componentFile": "equipment_slot.xml",
+                    "controllerParameters": {"state": "ready"},
+                    "previewValues": {"state": "ready"},
+                    "runtimeBindings": ["state"],
+                },
+            }
+        ]
+        state_map_path.write_text(json.dumps(state_map, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        fgui_spec_path = root / "specs" / "fgui_spec.md"
+        fgui_spec = fgui_spec_path.read_text(encoding="utf-8")
+        fgui_spec = fgui_spec.replace(
+            "| equipment_slot | state | idle,ready | idle | false | highlight_ready | REQ-EQUIPMENT-STATE | FGUI |",
+            f"| equipment_slot | state | idle,ready | idle | {'true' if exported else 'false'} | highlight_ready | REQ-EQUIPMENT-STATE | FGUI |",
+        )
+        instance_table = """## Instance Configuration
+
+| Instance ID | XML Name | Component Type | Component File | Configuration Mode | Controller Pages | Controller Parameters | Extension Parameters | Preview Values | Runtime Bindings | Requirement IDs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| equipment_slot_left_01 | equipment_slot_left | EquipmentSlot | equipment_slot.xml | controller_pages | state=ready | state=ready | none | state=ready | state | REQ-EQUIPMENT-STATE |
+
+"""
+        fgui_spec = fgui_spec.replace("## Transitions", instance_table + "## Transitions")
+        fgui_spec_path.write_text(fgui_spec, encoding="utf-8")
+
+        xml_dir = root / "fgui_xml" / "cooking"
+        xml_dir.mkdir(parents=True, exist_ok=True)
+        exported_attr = ' exported="true"' if exported else ""
+        (xml_dir / "equipment_slot.xml").write_text(
+            f"""<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state"{exported_attr} pages="0,idle,1,ready" selected="0"/>
+  <displayList>
+    <group id="n1_3qpk" name="highlight_ready">
+      <gearDisplay controller="state" pages="1"/>
+    </group>
+  </displayList>
+</component>
+""",
+            encoding="utf-8",
+        )
+        (xml_dir / "cooking_view.xml").write_text(
+            f"""<?xml version="1.0" encoding="utf-8"?>
+<component size="1920,1080">
+  <displayList>
+    <image id="n0_3qpk" name="bg_main" src="abc12" fileName="art/bg_main.png" size="1920,1080"/>
+    <component id="n1_3qpk" name="equipment_slot_left" src="slot1" fileName="equipment_slot.xml" xy="100,200" size="320,280" controller="{parent_encoding}"/>
+  </displayList>
+</component>
+""",
+            encoding="utf-8",
+        )
+        return xml_dir
+
+    def test_exported_controller_parameter_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_exported_controller_fixture(root)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"ok": true', result.stdout)
+
+    def test_controller_parameter_requires_exported_true(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_exported_controller_fixture(root, exported=False)
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fgui_controller_not_exported", result.stdout)
+            self.assertIn("xml_controller_not_exported", result.stdout)
+
+    def test_controller_parameter_page_index_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir = self.add_exported_controller_fixture(root, parent_encoding="state,0")
+            result = self.run_script(
+                "validate_semantic_controller_mapping.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_instance_controller_encoding_mismatch", result.stdout)
+
+    def test_display_list_background_after_content_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            fgui_spec_path = root / "specs" / "fgui_spec.md"
+            text = fgui_spec_path.read_text(encoding="utf-8")
+            text = text.replace(
+                "| cooking_view | 0 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | background | opaque_background | bgMain |",
+                "| cooking_view | 1 | bg_main | image | bg_main | abc12 | 0,0 | 1920,1080 | asset_manifest.displaySize | background | opaque_background | bgMain |",
+            ).replace(
+                "| cooking_view | 1 | equipment_slot_left | component | none | equipment_slot | 100,200 | 320,280 | layout_spec.bbox | content | normal | equipmentSlotLeft |",
+                "| cooking_view | 0 | equipment_slot_left | component | none | equipment_slot | 100,200 | 320,280 | layout_spec.bbox | content | normal | equipmentSlotLeft |",
+            )
+            fgui_spec_path.write_text(text, encoding="utf-8")
+            result = self.run_script(
+                "validate_display_list_z_order.py",
+                "--root", str(root),
+                "--stage", "fairygui_assembly",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("opaque_background_not_backmost", result.stdout)
+            self.assertIn("display_list_z_layer_order_invalid", result.stdout)
+
+    def test_xml_display_list_background_after_content_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.add_semantic_controller_specs(root)
+            xml_dir = root / "fgui_xml" / "cooking"
+            xml_dir.mkdir(parents=True, exist_ok=True)
+            (xml_dir / "cooking_view.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="1920,1080"><displayList>
+  <component id="n1_3qpk" name="equipment_slot_left" src="slot1" fileName="equipment_slot.xml" xy="100,200" size="320,280"/>
+  <image id="n0_3qpk" name="bg_main" src="abc12" fileName="art/bg_main.png" size="1920,1080"/>
+</displayList></component>
+""",
+                encoding="utf-8",
+            )
+            (xml_dir / "equipment_slot.xml").write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280"><displayList/></component>
+""",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_display_list_z_order.py",
+                "--root", str(root),
+                "--stage", "xml_generation",
+                "--xml-dir", str(xml_dir),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("xml_display_list_order_mismatch", result.stdout)
+            self.assertIn("xml_opaque_background_not_backmost", result.stdout)
+
+    def add_icon_asset(
+        self,
+        root: Path,
+        *,
+        asset_source: dict[str, object] | None,
+    ) -> None:
+        manifest_path = root / "manifests" / "asset_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        asset = {
+            "name": "icon_test",
+            "file": "fgui_xml/cooking/art/icon_test.png",
+            "packageRelativeFile": "art/icon_test.png",
+            "type": "icon",
+            "sourcePixelSize": [48, 48],
+            "displaySize": [48, 48],
+            "scalePolicy": "pixel_exact",
+            "renderMode": "normal",
+            "transparent": True,
+            "pivot": "center",
+            "fgui": {"resourceType": "image", "nodeType": "image", "layer": "icon"},
+        }
+        if asset_source is not None:
+            asset["assetSource"] = asset_source
+        manifest["assets"].append(asset)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_png(root / "fgui_xml" / "cooking" / "art" / "icon_test.png", 48, 48, alpha=True)
+
+    def test_icon_bitmap_provenance_passes_for_provided_bitmap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_icon_asset(
+                root,
+                asset_source={
+                    "mode": "provided_bitmap",
+                    "sourceFile": "references/ui_reference.png",
+                    "reviewStatus": "approved",
+                },
+            )
+            result = self.run_script(
+                "validate_bitmap_asset_provenance.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_icon_missing_bitmap_provenance_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_icon_asset(root, asset_source=None)
+            result = self.run_script(
+                "validate_bitmap_asset_provenance.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("icon_asset_source_missing", result.stdout)
+
+    def test_procedural_icon_generator_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_icon_asset(
+                root,
+                asset_source={
+                    "mode": "provided_bitmap",
+                    "sourceFile": "references/ui_reference.png",
+                    "reviewStatus": "approved",
+                },
+            )
+            scripts = root / "scripts"
+            scripts.mkdir(parents=True, exist_ok=True)
+            (scripts / "generate_icons.py").write_text(
+                "from PIL import ImageDraw\n# icon_test\nd = ImageDraw.Draw(None)\nd.polygon([(0,0),(1,1)])\n",
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_bitmap_asset_provenance.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("procedural_icon_generator_detected", result.stdout)
+
+    def test_icon_visual_part_cannot_use_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            self.add_semantic_controller_specs(root)
+            coverage_path = root / "specs" / "component_visual_parts.json"
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            part = coverage["components"][0]["parts"][0]
+            part["partId"] = "status_icon"
+            part["role"] = "status_icon"
+            part["implementation"]["mode"] = "graph"
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
+            result = self.run_script(
+                "validate_visual_part_coverage.py",
+                "--root", str(root),
+                "--stage", "asset_planning",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("icon_visual_part_graph_forbidden", result.stdout)
 
     def test_visual_part_role_is_project_defined_not_hardcoded(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1041,6 +1551,9 @@ class StrictValidatorTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn('"designApproved": true', result.stdout)
+            self.assertIn('"componentReuse": true', result.stdout)
+            self.assertIn('"displayListZOrder": true', result.stdout)
+            self.assertIn('"bitmapAssetProvenance": true', result.stdout)
 
     def test_readiness_and_fresh_validation_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1117,6 +1630,92 @@ class StrictValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("精确包内路径", result.stdout)
             self.assertIn("在包目录中不存在", result.stdout)
+
+    def add_external_controller_parameter(
+        self,
+        root: Path,
+        *,
+        exported: bool = True,
+        encoding: str = "state,1",
+    ) -> Path:
+        xml_dir = root / "fgui_xml" / "cooking"
+        registry_path = root / "manifests" / "fgui_id_registry.json"
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry["packages"]["cooking"]["resources"]["equipment_slot.xml"] = "slot1"
+        registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        package_path = xml_dir / "package.xml"
+        package_path.write_text(
+            package_path.read_text(encoding="utf-8").replace(
+                "  </resources>",
+                '    <component id="slot1" name="equipment_slot.xml" path="/" exported="true"/>\n  </resources>',
+            ),
+            encoding="utf-8",
+        )
+        exported_attr = ' exported="true"' if exported else ""
+        (xml_dir / "equipment_slot.xml").write_text(
+            f"""<?xml version="1.0" encoding="utf-8"?>
+<component size="320,280">
+  <controller name="state"{exported_attr} pages="0,idle,1,ready" selected="0"/>
+  <displayList/>
+</component>
+""",
+            encoding="utf-8",
+        )
+        component_path = xml_dir / "cooking_view.xml"
+        component_path.write_text(
+            component_path.read_text(encoding="utf-8").replace(
+                "  </displayList>",
+                f'    <component id="n1_3qpk" name="equipment_slot" src="slot1" fileName="equipment_slot.xml" xy="10,10" size="320,280" controller="{encoding}"/>\n  </displayList>',
+            ),
+            encoding="utf-8",
+        )
+        return xml_dir
+
+    def test_generic_external_controller_parameter_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_controller_parameter(root)
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"component_controller_parameters_checked": true', result.stdout)
+
+    def test_generic_external_controller_must_be_exported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_controller_parameter(root, exported=False)
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("未设置 exported", result.stdout)
+
+    def test_generic_external_controller_index_must_be_in_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_controller_parameter(root, encoding="state,2")
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("页索引越界", result.stdout)
 
     def add_external_button_override(
         self,

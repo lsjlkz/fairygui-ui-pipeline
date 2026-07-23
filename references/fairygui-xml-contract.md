@@ -28,10 +28,16 @@ Do not generate `package.xml` or component XML unless all of these are available
 - a passing `design_approval.json` record for `xml_generation`, bound to the exact approved image SHA-256
 - `references/asset-size-contract.md`
 - `references/semantic-controller-mapping-contract.md`
+- `references/component-reuse-parameterization-contract.md`
 - `references/component-instance-configuration-contract.md`
+- `references/display-list-z-order-contract.md`
+- `references/bitmap-icon-source-contract.md`
 - `references/visual-part-coverage-contract.md`
 - `references/package-resource-path-contract.md`
 - a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
+- a passing `scripts/validate_component_reuse.py --stage xml_generation` report
+- a passing `scripts/validate_display_list_z_order.py --stage xml_generation` report
+- a passing `scripts/validate_bitmap_asset_provenance.py --stage xml_generation` report
 - valid visual-reference declarations when visual assets were generated or reconstructed
 - `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap
 - `packageRelativeFile` for every file-backed package resource
@@ -44,6 +50,10 @@ When project files are accessible, enforce this gate with:
 ```bash
 python scripts/verify_embedded_docs.py
 python scripts/validate_semantic_controller_mapping.py --root UIProduction --stage xml_generation --out UIProduction/reports/semantic_controller_mapping_report.json --report-md UIProduction/reports/semantic_controller_mapping_report.md
+python scripts/validate_component_reuse.py --root UIProduction --stage xml_generation --out UIProduction/reports/component_reuse_report.json --report-md UIProduction/reports/component_reuse_report.md
+python scripts/validate_display_list_z_order.py --root UIProduction --stage xml_generation --out UIProduction/reports/display_list_z_order_report.json --report-md UIProduction/reports/display_list_z_order_report.md
+python scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage xml_generation --out UIProduction/reports/bitmap_asset_provenance_report.json --report-md UIProduction/reports/bitmap_asset_provenance_report.md
+python scripts/validate_visual_part_coverage.py --root UIProduction --stage xml_generation --out UIProduction/reports/visual_part_coverage_report.json --report-md UIProduction/reports/visual_part_coverage_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
 
@@ -72,7 +82,8 @@ The full XML spec includes rules that must not be dropped:
 - manifest-to-XML mapping
 - ID registry and stable regeneration rules
 - validation rules
-- per-instance configuration rules for reusable components, including variant defaults and readable preview values
+- reuse-first component planning, parameterizable fields, reusable child components, and justified structural variants
+- per-instance configuration rules for reusable components, including base-component defaults and readable preview values
 - visual-part coverage rules for required icons, frames, title decorations, backgrounds, separators, markers, and text nodes
 - UI adaptation and localization rules
 
@@ -92,10 +103,15 @@ The full XML spec includes rules that must not be dropped:
 - package resource `path` starts and ends with `/`.
 - `package.xml path + name` resolves to a real file under the directory containing `package.xml`.
 - fresh validation uses exact package-relative paths; basename-only equality is forbidden.
-- every reusable visual instance must have a verifiable implementation strategy and exactly one matching parent XML instance.
+- every reusable semantic component must declare one base component and a verifiable reuse strategy; every visual instance must have exactly one matching parent XML instance.
+- an instance-level finite state must prefer an exported Controller: target `controller@exported=true`, semantic `controllerParameters`, and parent `controller="name,pageIndex"`.
+- title, icon, portrait, value, color, size, localization, or selected-page differences alone must use parameters, Controllers, runtime binding, or reusable child components rather than separate XML files.
+- separate variant XML files require a valid structural or compatibility justification and must not have an identical normalized hierarchy.
+- `<displayList>` is back-to-front: opaque backgrounds are earliest; later full-size objects require explicit transparent-frame/overlay intent.
+- small art-directed icons require approved bitmap provenance; Graph/SVG/font glyph/PIL geometry substitutes are forbidden.
 - every required visible part declared in `component_visual_parts.json` must resolve to a Manifest asset, XML node, text node, child component, group, or explicitly approved fallback.
 - detailed visual parts may not be silently replaced by Graph without recorded human approval.
-- variant component default Controller pages must match `component_state_map.visualInstances.controllerPages`.
+- justified variant component default Controller pages must match `component_state_map.visualInstances.controllerPages`.
 - approved-design preview text must be readable before runtime localization; unresolved visible `@ui_...` keys are forbidden unless editor resolution is verified.
 - output XML is a draft until opened, visually compared with the approved design, checked, and published by FairyGUI editor.
 
@@ -119,11 +135,12 @@ Apply the selected profile as follows:
 
 Known editor-compatible attributes seen in the project include `designImageOffsetY`, `aspect`, `group`, `controller`, `advanced`, `anchor`, `clearOnPublish`, `autoClearText`, `autoPlay`, and `autoPlayRepeat`. Treat these as allowed compatibility attributes during review/repair. For fresh AI XML, only emit them when the current component actually needs the editor behavior and the reason is recorded in `fgui_spec.md`.
 
-A child extension node such as `<Button title="..." icon="ui://..."/>` or `<Label title="..." icon="ui://..."/>` under a `<component>` instance is a valid external parameter/override pattern when the referenced component has the matching `extention`. Do not flag these patterns as pseudo XML.
+A child extension node such as `<Button title="..." icon="ui://..."/>` or `<Label title="..." icon="ui://..."/>` under a `<component>` instance is a valid external parameter/override pattern when the referenced component has the matching `extention`. A reusable exported Controller is passed through the parent instance as `controller="name,pageIndex"`, where the target Controller has `exported="true"`. Do not flag these patterns as pseudo XML.
 
 For fresh XML, validate all of the following:
 
 - the component instance `src` resolves to a component resource
+- any `component@controller` value resolves to an exported Controller in that resource and uses a valid zero-based page index
 - the referenced component XML root `extention` matches the child node tag exactly
 - only attributes allowed by that extension type are used
 - `icon`, `selectedIcon`, `sound`, and other `ui://` attributes resolve to registered package resources
@@ -149,7 +166,14 @@ Never output XML containing:
 - Button/Label external `icon`, `selectedIcon`, or `sound` URLs that do not resolve to registered resources
 - unsupported attributes on external Button/Label override nodes
 - semantically different reusable instances that all use an unconfigured default component
-- variant component files whose selected Controller pages disagree with their visual-instance declaration
+- reusable components without `reusePlan` or without a matching Component Reuse Plan row
+- exported Controller parameters missing from the target XML or encoded with the wrong page index in the parent
+- opaque backgrounds or large covering components placed after normal content
+- icon assets without approved bitmap provenance or generated through procedural vector-like scripts
+- separate XML files created only for different titles, icons, portraits, values, colors, dimensions, localization keys, or default Controller pages
+- structurally identical variant XML files that should use one base component
+- composite components that fail to reference declared reusable child components
+- justified variant component files whose selected Controller pages disagree with their visual-instance declaration
 - missing visual-instance rows in `fgui_spec.md` or missing parent XML instances
 - missing required visual-part rows, Manifest assets, component nodes, or package resource references
 - detailed visual parts degraded to Graph without explicit human approval

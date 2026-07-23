@@ -105,7 +105,7 @@ Every component entry must contain:
 - `requirementIds`
 - non-empty `parts`
 
-A component file may be a reusable archetype, an explicit preview variant, or a composite panel.
+A component file should normally be a reusable base archetype or a composite component. Do not list one file per title, icon, portrait, number, color, or selected-page variation. An explicit preview variant is allowed only under `references/component-reuse-parameterization-contract.md` with a valid structural justification.
 
 ## Required Part Fields
 
@@ -145,6 +145,14 @@ Allowed modes:
 - a registered package resource
 - an XML node that resolves to that resource when XML exists
 
+### Icon-Like Parts
+
+Small art-directed icons, badges, crests, and emblems must use an approved bitmap path. Their implementation mode must be `asset_image`, `runtime_loader`, or an asset-backed `child_component`.
+
+Do not use FairyGUI Graph, SVG, font glyphs, PIL/ImageDraw geometry, or other procedural vector-like drawing to imitate production icons. Read `references/bitmap-icon-source-contract.md` and require Manifest `assetSource` provenance.
+
+Graph remains appropriate for plain separators, progress fills, translucent state overlays, hit areas, and debug geometry when those shapes are not intended to reproduce an art-directed icon.
+
 ### Detailed Parts and Graph Downgrade
 
 A part with `complexity=detailed` must not use `mode=graph` unless all of the following are present:
@@ -175,6 +183,12 @@ Recommended XML:
 ```xml
 <text name="title" text="READABLE PREVIEW" customData="loc:ui_key"/>
 ```
+
+### Reusable Part Structure
+
+When multiple components contain the same stable visual substructure, such as icon-plus-value, icon-plus-title, badge-plus-text, or a titled panel shell, extract it as a reusable child component when practical. Declare that child in the owning semantic component's `reusePlan.childComponentFiles` and represent it with `implementation.mode=child_component` where appropriate.
+
+A visual-part list must not legitimize duplicate variants. If several files have the same required nodes and differ only in content values, consolidate them into one base file and configure instances externally.
 
 ### File Scope
 
@@ -239,7 +253,11 @@ Block downstream work when:
 - a required XML node is missing
 - a declared asset exists but the XML node references another resource
 - a detailed part is replaced by Graph without explicit human approval
+- an icon, badge, crest, or emblem uses Graph or another procedural/vector-like substitute instead of an approved bitmap
+- an icon asset lacks a valid `assetSource` provenance record
 - a required preview text is blank or displays an unresolved localization key
+- multiple component files exist only to carry different titles, icons, portraits, values, colors, sizes, or default pages
+- a repeated stable substructure is duplicated across variants instead of being parameterized or extracted as a reusable child, without an explicit justification
 - the coverage table omits a declared part
 - `blockingForXml=true`
 
