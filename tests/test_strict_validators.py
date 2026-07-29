@@ -1490,10 +1490,122 @@ class StrictValidatorTests(unittest.TestCase):
     def declare_full_screen_design(self, root: Path) -> None:
         manifest_path = root / "manifests" / "asset_manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["production"]["generateFullScreenDesign"] = True
-        manifest["production"]["requiresDesignApproval"] = True
-        manifest["production"]["requiresVisualPartCoverage"] = True
+        manifest["production"].update({
+            "generateFullScreenDesign": True,
+            "requiresDesignApproval": True,
+            "requiresVisualPartCoverage": True,
+            "requiresAssetIsolation": True,
+            "requiresProductionPreviewLineage": True,
+            "requiresTypographyFidelity": True,
+        })
+        background = manifest["assets"][0]
+        background["assetSource"] = {
+            "mode": "provided_bitmap",
+            "sourceFile": "fgui_xml/cooking/art/bg_main.png",
+        }
+        background["assetIsolation"] = {
+            "role": "environment_background",
+            "cleanEnvironmentOnly": True,
+            "forbidBakedText": True,
+            "containsBakedText": False,
+            "containsDynamicChildContent": False,
+            "occlusionPolicy": "not_occluded",
+            "reviewStatus": "approved",
+            "reviewedBy": "user",
+            "reviewType": "user_confirmation",
+            "reviewEvidence": "reports/asset_isolation_review.md",
+        }
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        reports = root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "asset_isolation_review.md").write_text(
+            "# Asset Isolation Review\n\n- status: approved\n",
+            encoding="utf-8",
+        )
+
+        preview_path = root / "generated" / "preview" / "assembled_screen.png"
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        write_png(preview_path, 1920, 1080)
+        runtime_path = root / "fgui_xml" / "cooking" / "art" / "bg_main.png"
+        preview_hash = hashlib.sha256(preview_path.read_bytes()).hexdigest()
+        runtime_hash = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+
+        scripts = root / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "render_production_preview.py").write_text(
+            "# exact runtime asset: bg_main / art/bg_main.png\n",
+            encoding="utf-8",
+        )
+        lineage = {
+            "version": "0.1.0",
+            "screen": "cooking_view",
+            "fidelityMode": "exact_production_composite",
+            "productionPreview": {
+                "file": "generated/preview/assembled_screen.png",
+                "sha256": preview_hash,
+                "rendererScript": "scripts/render_production_preview.py",
+                "usesProductionAssets": True,
+                "approvalRecord": "reports/production_preview_approval.json",
+            },
+            "assets": [{
+                "assetName": "bg_main",
+                "runtimeFile": "fgui_xml/cooking/art/bg_main.png",
+                "runtimeSha256": runtime_hash,
+                "previewUsage": "exact_file",
+                "sourceLineage": {
+                    "designRelation": "exact_provided_source",
+                    "derivationMode": "exact_file",
+                    "sourceFile": "fgui_xml/cooking/art/bg_main.png",
+                    "sourceSha256": runtime_hash,
+                },
+            }],
+            "blockingForXml": False,
+        }
+        (root / "specs" / "production_preview_lineage.json").write_text(
+            json.dumps(lineage, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        approval = {
+            "version": "0.1.0",
+            "status": "approved",
+            "approvedFile": "generated/preview/assembled_screen.png",
+            "approvedFileSha256": preview_hash,
+            "approvedAssetHashes": {"bg_main": runtime_hash},
+            "confirmation": {
+                "type": "user_confirmation",
+                "recordedBy": "user",
+                "note": "User approved exact production preview.",
+                "confirmedAt": "2026-07-21T00:00:00Z",
+            },
+        }
+        (reports / "production_preview_approval.json").write_text(
+            json.dumps(approval, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        typography = {
+            "version": "0.1.0",
+            "screen": "cooking_view",
+            "containsText": False,
+            "fidelityMode": "exact",
+            "reviewStatus": "approved",
+            "review": {
+                "type": "user_confirmation",
+                "recordedBy": "user",
+                "note": "This fixture intentionally contains no text.",
+            },
+            "blockingForXml": False,
+        }
+        typography_path = root / "specs" / "typography_spec.json"
+        typography_path.write_text(
+            json.dumps(typography, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        lineage_path = root / "specs" / "production_preview_lineage.json"
+        approval_path = reports / "production_preview_approval.json"
+        approval = json.loads(approval_path.read_text(encoding="utf-8"))
+        approval["approvedEvidenceHashes"] = {
+            "productionPreviewLineage": hashlib.sha256(lineage_path.read_bytes()).hexdigest(),
+            "typographySpec": hashlib.sha256(typography_path.read_bytes()).hexdigest(),
+        }
+        approval_path.write_text(json.dumps(approval, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def test_pipeline_validator_blocks_unapproved_full_screen_design(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1717,6 +1829,55 @@ class StrictValidatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("页索引越界", result.stdout)
 
+    def test_fresh_controller_pages_require_id_name_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir, _ = self.create_project(root)
+            component_path = xml_dir / "cooking_view.xml"
+            component_path.write_text(
+                component_path.read_text(encoding="utf-8").replace(
+                    "  <displayList>",
+                    '  <controller name="state" pages="idle,ready" selected="0"/>\n  <displayList>',
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("数字 pageId,pageName 成对序列", result.stdout)
+
+    def test_gear_look_requires_five_serialized_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            xml_dir, _ = self.create_project(root)
+            component_path = xml_dir / "cooking_view.xml"
+            xml = component_path.read_text(encoding="utf-8")
+            xml = xml.replace(
+                "  <displayList>",
+                '  <controller name="state" pages="0,normal,1,disabled" selected="0"/>\n  <displayList>',
+            ).replace(
+                '    <image id="n0_3qpk" name="bg_main" src="abc12" fileName="art/bg_main.png" size="1920,1080"/>',
+                '    <image id="n0_3qpk" name="bg_main" src="abc12" fileName="art/bg_main.png" size="1920,1080">\n'
+                '      <gearLook controller="state" pages="0,1" values="1,0,1,0|0.5,0,1,1" default="1,0,1,0"/>\n'
+                '    </image>',
+            )
+            component_path.write_text(xml, encoding="utf-8")
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("gearLook 每个 values 状态必须包含 5 个字段", result.stdout)
+            self.assertIn("gearLook@default 必须包含 5 个字段", result.stdout)
+
     def add_external_button_override(
         self,
         root: Path,
@@ -1843,6 +2004,25 @@ class StrictValidatorTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("不支持的属性", result.stdout)
+
+    def test_fresh_button_enum_spelling_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "UIProduction"
+            self.create_project(root)
+            xml_dir = self.add_external_button_override(
+                root,
+                extra_attribute='mode="Common" downEffect="dark"',
+            )
+            result = self.run_script(
+                "validate_fgui_xml.py",
+                "--xml-dir", str(xml_dir),
+                "--manifest", str(root / "manifests" / "asset_manifest.json"),
+                "--registry", str(root / "manifests" / "fgui_id_registry.json"),
+                "--mode", "fresh",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Button@mode 必须使用小写合法值", result.stdout)
+            self.assertIn("Button@downEffect 必须使用合法值", result.stdout)
 
     def test_invalid_package_id_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

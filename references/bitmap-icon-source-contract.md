@@ -8,7 +8,7 @@ Do not replace approved-design icons with programmatically drawn vector-like sha
 
 For style-sensitive UI, small icons must come from an approved bitmap source path:
 
-- cut from the approved full-screen design
+- cut from the approved full-screen design only when the exact region is already self-contained and separately passes asset-isolation review
 - cut from an approved generated asset sheet
 - supplied by the user/project as a bitmap
 - reused from an existing FairyGUI package bitmap
@@ -38,8 +38,18 @@ Every `asset_manifest.json.assets[]` entry classified as an icon must contain `a
     "mode": "approved_design_slice",
     "sourceFile": "generated/design/screen_design_final.png",
     "crop": [120, 80, 48, 48],
-    "cleanup": "transparent_background_and_edge_repair",
+    "cleanup": "source_region_already_self_contained",
     "reviewStatus": "approved"
+  },
+  "assetIsolation": {
+    "role": "isolated_icon",
+    "requiresTransparentBackground": true,
+    "forbidNeighborPixels": true,
+    "sourceRegionContainsOnlyAsset": true,
+    "reviewStatus": "approved",
+    "reviewedBy": "user",
+    "reviewType": "user_confirmation",
+    "reviewEvidence": "reports/asset_isolation_review.md"
   }
 }
 ```
@@ -120,7 +130,7 @@ Path2D
 
 production is blocked until the icon is replaced by an approved bitmap source.
 
-Post-processing scripts may crop, trim, resize, alpha-clean, or copy an approved bitmap. They must not redraw the icon shape.
+Post-processing scripts may crop, trim, resize, alpha-clean, or copy an approved bitmap. They must not redraw the icon shape. A plain rectangular crop is valid only when the source region is already isolated; naming a crop `transparent_background_and_edge_repair` does not perform that cleanup. Read and enforce `references/asset-isolation-contract.md`.
 
 ## Hard Errors
 
@@ -145,4 +155,5 @@ Before XML generation, visually compare each icon against the approved design or
 - palette and material match
 - no generic vector-icon appearance
 - transparent edges are clean
+- no neighboring panel/text pixels or opaque screenshot rectangle remain
 - icon is readable at actual FairyGUI display size

@@ -32,12 +32,18 @@ Do not generate `package.xml` or component XML unless all of these are available
 - `references/component-instance-configuration-contract.md`
 - `references/display-list-z-order-contract.md`
 - `references/bitmap-icon-source-contract.md`
+- `references/asset-isolation-contract.md`
+- `references/production-preview-lineage-contract.md`
+- `references/typography-fidelity-contract.md`
 - `references/visual-part-coverage-contract.md`
 - `references/package-resource-path-contract.md`
 - a passing `scripts/validate_semantic_controller_mapping.py --stage xml_generation` report
 - a passing `scripts/validate_component_reuse.py --stage xml_generation` report
 - a passing `scripts/validate_display_list_z_order.py --stage xml_generation` report
 - a passing `scripts/validate_bitmap_asset_provenance.py --stage xml_generation` report
+- a passing `scripts/validate_asset_isolation.py --stage xml_generation` report and `reports/asset_isolation_review.md`
+- a passing `scripts/validate_production_preview_lineage.py --stage xml_generation` report, valid per-asset `sourceLineage`, and human `reports/production_preview_approval.json`
+- a passing `scripts/validate_typography_fidelity.py --stage xml_generation` report and current `reports/typography_render_trace.json`
 - valid visual-reference declarations when visual assets were generated or reconstructed
 - `sourcePixelSize`, `displaySize`, `scalePolicy`, and `renderMode` for every bitmap
 - `packageRelativeFile` for every file-backed package resource
@@ -53,6 +59,9 @@ python scripts/validate_semantic_controller_mapping.py --root UIProduction --sta
 python scripts/validate_component_reuse.py --root UIProduction --stage xml_generation --out UIProduction/reports/component_reuse_report.json --report-md UIProduction/reports/component_reuse_report.md
 python scripts/validate_display_list_z_order.py --root UIProduction --stage xml_generation --out UIProduction/reports/display_list_z_order_report.json --report-md UIProduction/reports/display_list_z_order_report.md
 python scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage xml_generation --out UIProduction/reports/bitmap_asset_provenance_report.json --report-md UIProduction/reports/bitmap_asset_provenance_report.md
+python scripts/validate_asset_isolation.py --root UIProduction --stage xml_generation --xml-dir UIProduction/fgui_xml/<package_name> --out UIProduction/reports/asset_isolation_report.json --report-md UIProduction/reports/asset_isolation_report.md
+python scripts/validate_production_preview_lineage.py --root UIProduction --stage xml_generation --out UIProduction/reports/production_preview_lineage_report.json --report-md UIProduction/reports/production_preview_lineage_report.md
+python scripts/validate_typography_fidelity.py --root UIProduction --stage xml_generation --xml-dir UIProduction/fgui_xml/<package_name> --out UIProduction/reports/typography_fidelity_report.json --report-md UIProduction/reports/typography_fidelity_report.md
 python scripts/validate_visual_part_coverage.py --root UIProduction --stage xml_generation --out UIProduction/reports/visual_part_coverage_report.json --report-md UIProduction/reports/visual_part_coverage_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
@@ -109,6 +118,9 @@ The full XML spec includes rules that must not be dropped:
 - separate variant XML files require a valid structural or compatibility justification and must not have an identical normalized hierarchy.
 - `<displayList>` is back-to-front: opaque backgrounds are earliest; later full-size objects require explicit transparent-frame/overlay intent.
 - small art-directed icons require approved bitmap provenance; Graph/SVG/font glyph/PIL geometry substitutes are forbidden.
+- complete-screen projects require `production.requiresAssetIsolation=true`; every production bitmap declares an isolation role and review evidence. The approved mockup cannot be a runtime background, plain crops cannot claim isolation/reconstruction, isolated portraits/icons require clean alpha, and component skins cannot bake dynamic text or child content.
+- complete-screen projects require `production.requiresProductionPreviewLineage=true`; every runtime bitmap declares exact approved/provided source or justified reference reconstruction and deterministic derivation evidence, the final preview is composed from exact staged files, and human approval freezes the preview plus runtime hashes.
+- complete-screen projects require `production.requiresTypographyFidelity=true`; image-model lettering is reference-only, every text node is derived from one approved typography spec shared by preview and XML, and deterministic preview rendering emits a matching per-instance render trace.
 - every required visible part declared in `component_visual_parts.json` must resolve to a Manifest asset, XML node, text node, child component, group, or explicitly approved fallback.
 - detailed visual parts may not be silently replaced by Graph without recorded human approval.
 - justified variant component default Controller pages must match `component_state_map.visualInstances.controllerPages`.
@@ -170,6 +182,9 @@ Never output XML containing:
 - exported Controller parameters missing from the target XML or encoded with the wrong page index in the parent
 - opaque backgrounds or large covering components placed after normal content
 - icon assets without approved bitmap provenance or generated through procedural vector-like scripts
+- complete approved mockups registered as runtime backgrounds; plain crop scripts presented as alpha extraction/UI removal/reconstruction; opaque screenshot portraits/icons; panel/button/frame skins with baked dynamic text or reusable child content
+- final preview assets that are independently regenerated look-alikes rather than the exact staged runtime files, missing/false source-lineage claims, exact-copy/crop pixel mismatches, or runtime assets changed after production-preview approval
+- preview and XML typography sourced from different fonts/styles, hardcoded preview fonts not represented in the typography spec, missing/stale typography render trace, or mismatched text attributes/bounds
 - separate XML files created only for different titles, icons, portraits, values, colors, dimensions, localization keys, or default Controller pages
 - structurally identical variant XML files that should use one base component
 - composite components that fail to reference declared reusable child components

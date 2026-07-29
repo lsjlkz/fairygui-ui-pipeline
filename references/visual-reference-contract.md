@@ -66,6 +66,7 @@ Rules:
 - References used for layout must be connected to `layout_spec.json.sourceImages`.
 - References used for asset generation must be recorded in the relevant sheet/imagegen prompt batch.
 - A generated mockup may become a reference only after it is saved, named, and accepted as a project source.
+- Reference approval does not make the whole image a valid runtime asset or universal slice sheet. The exact approved full-screen mockup remains reference-only unless a region is already self-contained and separately passes `references/asset-isolation-contract.md`.
 
 ## Requirement Gate
 
@@ -97,4 +98,4 @@ If the gate fails, output:
 
 ## Automation Boundary
 
-AI may analyze the reference and propose semantic/style mappings. Deterministic checks must verify file existence, image dimensions, manifest declarations, and reference-to-layout links. Human review remains required for whether the generated resources actually match the intended art direction.
+AI may analyze the reference and propose semantic/style mappings. Deterministic checks must verify file existence, image dimensions, manifest declarations, reference-to-layout links, and asset-isolation declarations. Human review remains required for whether generated resources match the intended art direction and whether each runtime bitmap is cleanly isolated from neighboring UI, text, subjects, and occluded content.

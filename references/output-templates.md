@@ -387,12 +387,23 @@ Record after explicit confirmation of the exact file:
   "version": "0.1.0",
   "screen": "screen_name",
   "sourceLayout": "specs/layout_spec.json",
-  "sourceImages": [],
+  "sourceImages": [
+    "generated/sheets/ui_icon_preview.png"
+  ],
   "rules": {
     "doNotSliceDynamicStatesFromFlatDesign": true,
-    "requireOverlayReviewBeforeXml": true
+    "requireOverlayReviewBeforeXml": true,
+    "requireExactRegisteredResourcePreviewSource": true
   },
-  "slices": []
+  "slices": [
+    {
+      "name": "icon_example",
+      "sourceFile": "generated/sheets/ui_icon_preview.png",
+      "crop": [0, 0, 64, 64],
+      "output": "fgui_xml/cooking/art/icon_example.png",
+      "extractionMode": "exact_crop"
+    }
+  ]
 }
 ```
 
@@ -408,6 +419,9 @@ Record after explicit confirmation of the exact file:
     "generateFullScreenDesign": true,
     "requiresDesignApproval": true,
     "requiresVisualPartCoverage": true,
+    "requiresAssetIsolation": true,
+    "requiresProductionPreviewLineage": true,
+    "requiresTypographyFidelity": true,
     "generateVisualAssets": true,
     "requiresVisualReference": true
   },
@@ -418,6 +432,16 @@ Record after explicit confirmation of the exact file:
       "resolution": [1920, 1080],
       "isPrimary": true,
       "allowedUses": ["style", "layout", "asset_generation"]
+    }
+  ],
+  "sheets": [
+    {
+      "name": "ui_icon_preview",
+      "file": "generated/sheets/ui_icon_preview.png",
+      "reviewStatus": "approved",
+      "reviewedBy": "user",
+      "reviewType": "user_confirmation",
+      "reviewEvidence": "reports/asset_isolation_review.md"
     }
   ],
   "assets": [
@@ -434,6 +458,45 @@ Record after explicit confirmation of the exact file:
         "mode": "provided_bitmap",
         "sourceFile": "references/ui_reference.png",
         "reviewStatus": "approved"
+      },
+      "assetIsolation": {
+        "role": "environment_background",
+        "cleanEnvironmentOnly": true,
+        "forbidBakedText": true,
+        "containsBakedText": false,
+        "containsDynamicChildContent": false,
+        "occlusionPolicy": "not_occluded",
+        "reviewStatus": "approved",
+        "reviewedBy": "user",
+        "reviewType": "user_confirmation",
+        "reviewEvidence": "reports/asset_isolation_review.md"
+      }
+    },
+    {
+      "name": "icon_example",
+      "file": "fgui_xml/cooking/art/icon_example.png",
+      "packageRelativeFile": "art/icon_example.png",
+      "sourcePixelSize": [64, 64],
+      "displaySize": [64, 64],
+      "scalePolicy": "pixel_exact",
+      "renderMode": "normal",
+      "transparent": true,
+      "assetSource": {
+        "mode": "approved_sheet_slice",
+        "sourceFile": "generated/sheets/ui_icon_preview.png",
+        "crop": [0, 0, 64, 64],
+        "reviewStatus": "approved"
+      },
+      "assetIsolation": {
+        "role": "isolated_icon",
+        "requiresTransparentBackground": true,
+        "forbidNeighborPixels": true,
+        "sourceRegionContainsOnlyAsset": true,
+        "forbidBakedText": true,
+        "reviewStatus": "approved",
+        "reviewedBy": "user",
+        "reviewType": "user_confirmation",
+        "reviewEvidence": "reports/asset_isolation_review.md"
       }
     }
   ]
@@ -637,6 +700,203 @@ Use this table whenever a parent component instance contains an external `<Butto
 }
 ```
 
+## production_preview_lineage.json
+
+```json
+{
+  "version": "0.1.0",
+  "screen": "screen_name",
+  "fidelityMode": "exact_production_composite",
+  "productionPreview": {
+    "file": "generated/preview/assembled_screen.png",
+    "sha256": "<preview-sha256>",
+    "rendererScript": "scripts/render_production_preview.py",
+    "usesProductionAssets": true,
+    "approvalRecord": "reports/production_preview_approval.json"
+  },
+  "assets": [
+    {
+      "assetName": "icon_example",
+      "runtimeFile": "fgui_xml/package/art/icon_example.png",
+      "runtimeSha256": "<runtime-file-sha256>",
+      "previewUsage": "exact_file",
+      "sourceLineage": {
+        "designRelation": "exact_approved_source",
+        "derivationMode": "exact_crop",
+        "sourceFile": "generated/sheets/ui_icon_preview.png",
+        "sourceSha256": "<source-file-sha256>",
+        "crop": [0, 0, 64, 64]
+      }
+    }
+  ],
+  "blockingForXml": false
+}
+```
+
+## production_preview_approval.json
+
+```json
+{
+  "version": "0.1.0",
+  "status": "approved",
+  "candidateFile": "generated/preview/assembled_screen.png",
+  "candidateFileSha256": "<preview-sha256>",
+  "candidateAssetHashes": {
+    "icon_example": "<runtime-file-sha256>"
+  },
+  "candidateEvidenceHashes": {
+    "productionPreviewLineage": "<lineage-file-sha256>",
+    "typographySpec": "<typography-spec-sha256>",
+    "typographyRenderTrace": "<typography-render-trace-sha256>"
+  },
+  "approvedFile": "generated/preview/assembled_screen.png",
+  "approvedFileSha256": "<preview-sha256>",
+  "approvedAssetHashes": {
+    "icon_example": "<runtime-file-sha256>"
+  },
+  "approvedEvidenceHashes": {
+    "productionPreviewLineage": "<lineage-file-sha256>",
+    "typographySpec": "<typography-spec-sha256>",
+    "typographyRenderTrace": "<typography-render-trace-sha256>"
+  },
+  "confirmation": {
+    "type": "user_confirmation",
+    "recordedBy": "user",
+    "note": "User approved this exact production preview and runtime asset set.",
+    "confirmedAt": "2026-01-01T00:00:00Z"
+  },
+  "reviewNotes": [],
+  "updatedAt": "2026-01-01T00:00:00Z"
+}
+```
+
+## typography_spec.json
+
+```json
+{
+  "version": "0.1.0",
+  "screen": "screen_name",
+  "containsText": true,
+  "fidelityMode": "exact",
+  "productionPreview": {
+    "file": "generated/preview/assembled_screen.png",
+    "textRenderingMode": "deterministic_text_overlay",
+    "rendererScript": "scripts/render_production_preview.py",
+    "renderTrace": "reports/typography_render_trace.json",
+    "usesTypographySpec": true
+  },
+  "styles": [
+    {
+      "styleId": "panel_title",
+      "xmlAttributes": {
+        "font": "ui://packageidfontid",
+        "fontSize": "23",
+        "color": "#493426",
+        "align": "center",
+        "vAlign": "middle",
+        "autoSize": "none",
+        "singleLine": "true",
+        "bold": "true",
+        "strokeColor": "#f3dfb6",
+        "strokeSize": "1"
+      }
+    }
+  ],
+  "instances": [
+    {
+      "componentFile": "strategy_panel.xml",
+      "xmlNodeName": "title",
+      "hostComponentFile": "",
+      "hostInstanceName": "",
+      "styleId": "panel_title",
+      "previewText": "STRATEGY",
+      "localizationKey": "ui_strategy",
+      "bbox": [90, 12, 153, 42]
+    }
+  ],
+  "reviewStatus": "approved",
+  "review": {
+    "type": "user_confirmation",
+    "recordedBy": "user",
+    "note": "User approved the deterministic production typography."
+  },
+  "blockingForXml": false
+}
+```
+
+## typography_render_trace.json
+
+```json
+{
+  "typographySpecSha256": "<current-typography-spec-sha256>",
+  "rendererScript": "scripts/render_production_preview.py",
+  "previewFile": "generated/preview/assembled_screen.png",
+  "instances": [
+    {
+      "componentFile": "strategy_panel.xml",
+      "xmlNodeName": "title",
+      "hostComponentFile": "",
+      "hostInstanceName": "",
+      "styleId": "panel_title",
+      "previewText": "STRATEGY",
+      "bbox": [90, 12, 153, 42],
+      "xmlAttributes": {
+        "font": "ui://packageidfontid",
+        "fontSize": "23",
+        "color": "#493426",
+        "align": "center",
+        "vAlign": "middle",
+        "autoSize": "none",
+        "singleLine": "true",
+        "bold": "true",
+        "strokeColor": "#f3dfb6",
+        "strokeSize": "1"
+      }
+    }
+  ]
+}
+```
+
+## asset_isolation_report.json
+
+```json
+{
+  "validator": "asset_isolation",
+  "ok": true,
+  "status": "PASS",
+  "root": "UIProduction",
+  "stage": "xml_generation",
+  "asset_isolation_checked": true,
+  "checkedAssets": [],
+  "plainCropScripts": [],
+  "errors": [],
+  "warnings": [],
+  "issues": [],
+  "summary": {
+    "assetsChecked": 12,
+    "errors": 0,
+    "warnings": 0
+  }
+}
+```
+
+## asset_isolation_review.md
+
+```md
+# Asset Isolation Review
+
+- approved design: `generated/design/screen_design_final.png`
+- contact sheet: `generated/preview/asset_contact_sheet.png`
+- reviewedBy: user_or_named_human
+- reviewType: user_confirmation | human_visual_review | artist_review | designer_review | qa_review
+- status: approved
+
+## Per-Asset Review
+
+| Asset | Role | Transparent / Clean Background | Neighbor Pixels | Baked Text | Dynamic Child Content | Decision |
+|---|---|---|---|---|---|---|
+```
+
 ## component_reuse_report.md
 
 ```md
@@ -791,15 +1051,34 @@ The real report contains all 16 canonical stage entries, including skipped stage
 
 ## cut_report.json
 
+Every `approved_sheet_slice` output records the exact source bitmap actually opened by the slicer. Do not record the pre-alpha or pre-cleanup sheet when the script reads a different processed sheet.
+
 ```json
 {
   "ok": true,
-  "sheet": "sheet_food_5x4",
   "checkedAt": "2026-01-01T00:00:00Z",
   "outputs": [
     {
-      "name": "food_patty_raw",
-      "file": "generated/sliced/food_patty_raw.png",
+      "name": "icon_example",
+      "file": "fgui_xml/cooking/art/icon_example.png",
+      "sourceFile": "generated/sheets/ui_icon_preview.png",
+      "crop": [0, 0, 64, 64],
+      "derivationMode": "exact_crop",
+      "sourceSha256": "<exact-source-sheet-sha256>",
+      "outputSha256": "<runtime-output-sha256>",
+      "status": "ok",
+      "warnings": []
+    },
+    {
+      "name": "portrait_example",
+      "file": "fgui_xml/cooking/art/portrait_example.png",
+      "sourceFile": "generated/sheets/hero_preview_alpha.png",
+      "crop": [0, 0, 512, 1024],
+      "derivationMode": "deterministic_transform",
+      "processorScript": "scripts/process_generated_assets.py",
+      "processorScriptSha256": "<processor-script-sha256>",
+      "sourceSha256": "<exact-source-sheet-sha256>",
+      "outputSha256": "<runtime-output-sha256>",
       "status": "ok",
       "warnings": []
     }
@@ -824,6 +1103,10 @@ The real report contains all 16 canonical stage entries, including skipped stage
   "componentReuse": true,
   "displayListZOrder": true,
   "bitmapAssetProvenance": true,
+  "assetIsolation": true,
+  "assetIsolationApplicable": true,
+  "productionPreviewLineage": true,
+  "typographyFidelity": true,
   "visualPartCoverage": true,
   "designApproved": true,
   "packageName": "cooking",
@@ -849,6 +1132,11 @@ The real report contains all 16 canonical stage entries, including skipped stage
     "visualDesignBrief": "specs/visual_design_brief.md",
     "designApproval": "reports/design_approval.json",
     "approvedDesign": "generated/design/screen_design_final.png",
+    "assetIsolationReview": "reports/asset_isolation_review.md",
+    "productionPreviewLineage": "specs/production_preview_lineage.json",
+    "productionPreviewApproval": "reports/production_preview_approval.json",
+    "typographySpec": "specs/typography_spec.json",
+    "typographyRenderTrace": "reports/typography_render_trace.json",
     "referenceImage0": "references/ui_reference.png",
     "assetImage0": "fgui_xml/cooking/art/bg_main.png"
   },
@@ -877,6 +1165,10 @@ The real report contains all 16 canonical stage entries, including skipped stage
   "component_reuse_checked": true,
   "display_list_z_order_checked": true,
   "bitmap_asset_provenance_checked": true,
+  "asset_isolation_checked": true,
+  "asset_isolation_applicable": true,
+  "production_preview_lineage_checked": true,
+  "typography_fidelity_checked": true,
   "visual_part_coverage_checked": true,
   "error_count": 0,
   "warning_count": 0,

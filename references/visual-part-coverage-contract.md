@@ -143,13 +143,14 @@ Allowed modes:
 - `assetName`
 - a matching `asset_manifest.json.assets[].name`
 - a registered package resource
+- a valid `assetIsolation` declaration and passing isolation review when the project enables `production.requiresAssetIsolation`
 - an XML node that resolves to that resource when XML exists
 
 ### Icon-Like Parts
 
 Small art-directed icons, badges, crests, and emblems must use an approved bitmap path. Their implementation mode must be `asset_image`, `runtime_loader`, or an asset-backed `child_component`.
 
-Do not use FairyGUI Graph, SVG, font glyphs, PIL/ImageDraw geometry, or other procedural vector-like drawing to imitate production icons. Read `references/bitmap-icon-source-contract.md` and require Manifest `assetSource` provenance.
+Do not use FairyGUI Graph, SVG, font glyphs, PIL/ImageDraw geometry, or other procedural vector-like drawing to imitate production icons. Read `references/bitmap-icon-source-contract.md` and require Manifest `assetSource` provenance. Provenance alone is insufficient: an icon cropped from a full-screen mockup must also pass `references/asset-isolation-contract.md`, contain no neighboring pixels, and provide usable transparency unless an intentional reviewed plate is part of the icon.
 
 Graph remains appropriate for plain separators, progress fills, translucent state overlays, hit areas, and debug geometry when those shapes are not intended to reproduce an art-directed icon.
 
@@ -223,6 +224,7 @@ Validate:
 - the coverage file exists and is structurally complete
 - approved-design sources are recorded
 - every required asset-backed part exists in the manifest
+- every required asset-backed part has a valid isolation plan when the gate is enabled
 - detailed parts are not silently downgraded to Graph
 
 ### `fairygui_assembly`
@@ -250,6 +252,7 @@ Block downstream work when:
 - `component_visual_parts.json` is missing for an approved complete-screen design
 - a required visible part has no implementation
 - a required asset-backed part is absent from the manifest
+- an asset-backed part exists but fails resource-isolation validation
 - a required XML node is missing
 - a declared asset exists but the XML node references another resource
 - a detailed part is replaced by Graph without explicit human approval

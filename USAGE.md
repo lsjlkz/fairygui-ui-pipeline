@@ -83,6 +83,16 @@ reports/pipeline_stage_timings.md
 
 当任务是根据需求或设计文档创建完整游戏界面时，必须先生成整屏设计稿。生成后必须停止，等待用户明确确认具体图片。AI 不得自行确认，也不能把“继续”“差不多”或沉默推断为批准。确认记录会绑定设计图 SHA-256，图片发生任何修改都必须重新确认。
 
+整屏设计稿确认只代表构图、风格和大致资源形态获得确认。生产资源生成和切图完成后，还必须把最终包内资源原文件拼成生产预览图，并进行第二次人工确认。第二次确认会冻结预览图和每个运行时图片的 SHA-256；之后不能偷偷重新生成另一套相似资源。
+
+原则上应当是“权威源图 → 确定性复制/裁切/变换 → 最终切图资源 → 拼装生产预览”，而不是无条件重新生成一套近似资源。只有已经独立、无遮挡、无邻近内容且满足透明要求的区域，才允许从给定预览图精确裁切；无法精确提取时必须声明 `reference_reconstruction` 和原因，不能声称与批准设计像素一致。
+
+每个运行时位图必须在 `production_preview_lineage.json.assets[].sourceLineage` 中记录 `designRelation`、`derivationMode`、源文件、源文件哈希，以及必要的 crop 或变换脚本哈希。
+
+使用 `approved_sheet_slice` 时，切图源必须是经过登记和审核的资源预览图。`manifest.sheets[].file`、`assetSource.sourceFile`、`slice_plan.sourceImages/sourceFile`、`cut_report.outputs[].sourceFile` 和 `sourceLineage.sourceFile` 必须指向同一实际文件。脚本若读取 `_alpha`、`_clean` 或其他处理后图片，就必须按该真实文件名重新登记和审核，不能仍声明原始 sheet。`cut_report.json` 还必须逐资源冻结 crop、输出路径、源/输出哈希，以及确定性处理脚本哈希。
+
+图像模型生成的文字只作为风格参考。最终预览和 XML 必须共用 `typography_spec.json`，不能由预览脚本硬编码一套系统字体，而 XML 又使用 FairyGUI 默认字体。确定性文字渲染还必须输出 `reports/typography_render_trace.json`，逐项证明实际渲染的文字、bbox 和样式参数来自当前 Typography Spec。复用 Button/Label 的不同实例若字号、颜色或标题不同，必须用 `hostComponentFile`、`hostInstanceName` 指向父级实例，并在父 XML 的 `<Button>/<Label>` 中真实覆盖 `titleFontSize/titleColor/title`；只改预览脚本不算实现。
+
 每个图片资源必须分别声明：
 
 - `sourcePixelSize`：实际 PNG 像素尺寸
@@ -103,12 +113,18 @@ XML 不是默认产物。只有满足下面条件时才允许生成 XML：
 - 已读取 `references/component-instance-configuration-contract.md`
 - 已读取 `references/display-list-z-order-contract.md`
 - 已读取 `references/bitmap-icon-source-contract.md`
+- 已读取 `references/asset-isolation-contract.md`
+- 已读取 `references/production-preview-lineage-contract.md`
+- 已读取 `references/typography-fidelity-contract.md`
 - 已读取 `references/visual-part-coverage-contract.md`
 - 已读取 `references/package-resource-path-contract.md`
 - `validate_semantic_controller_mapping.py --stage xml_generation` 已通过
 - `validate_component_reuse.py --stage xml_generation` 已通过
 - `validate_display_list_z_order.py --stage xml_generation` 已通过
 - `validate_bitmap_asset_provenance.py --stage xml_generation` 已通过
+- `validate_asset_isolation.py --stage xml_generation` 已通过
+- `validate_production_preview_lineage.py --stage xml_generation` 已通过
+- `validate_typography_fidelity.py --stage xml_generation` 已通过
 - `validate_visual_part_coverage.py --stage xml_generation` 已通过
 - 已有 `asset_manifest.json`
 - 已有 `fgui_id_registry.json`
@@ -125,6 +141,9 @@ XML 不是默认产物。只有满足下面条件时才允许生成 XML：
 - 需要由父组件固定 Controller 页时，目标 Controller 设置 `exported="true"`，实例声明 `controllerParameters`，父 XML 精确写入 `controller="名称,页索引"`
 - Display List 已声明 `Z Layer` 与 `Occlusion Policy`；不透明背景位于 XML 最前部
 - 每个小图标都有合法 `assetSource`，且不是 Graph/SVG/字体/PIL 几何生成
+- 完整设计项目设置了 `production.requiresAssetIsolation=true`；每个生产位图声明 `assetIsolation`，整屏设计稿没有被当作运行时背景，人物/图标不是带底色的矩形截图，面板/按钮皮肤没有烘焙动态文字或子组件内容
+- 完整设计项目设置了 `production.requiresProductionPreviewLineage=true`；最终预览使用包内实际资源文件，每个资源声明 exact source/crop 或 reference reconstruction 的 `sourceLineage`，并有冻结预览与资源哈希的人工批准记录
+- 完整设计项目设置了 `production.requiresTypographyFidelity=true`；最终预览和 XML 使用同一字体、字号、颜色、对齐、字距、描边、阴影和文本框规格，且 `typography_render_trace.json` 与当前 Spec 哈希及全部文本实例一致
 - 每个复用组件实例都在 `component_state_map.visualInstances` 和 `fgui_spec.md` Instance Configuration 中有明确配置
 - `component_visual_parts.json` 已记录设计稿中所有必需可见部件，并在 Manifest 或 XML 中声明实现
 - 语义不同的实例不能全部使用同一个未配置默认组件，也不能仅因标题、图标、立绘、数值、颜色、尺寸或默认页不同就拆成多份同构 XML
@@ -157,6 +176,24 @@ python scripts/validate_bitmap_asset_provenance.py \
   --stage asset_planning \
   --out /path/to/UIProduction/reports/bitmap_asset_provenance_report.json \
   --report-md /path/to/UIProduction/reports/bitmap_asset_provenance_report.md
+
+python scripts/validate_asset_isolation.py \
+  --root /path/to/UIProduction \
+  --stage asset_planning \
+  --out /path/to/UIProduction/reports/asset_isolation_report.json \
+  --report-md /path/to/UIProduction/reports/asset_isolation_report.md
+
+python scripts/validate_production_preview_lineage.py \
+  --root /path/to/UIProduction \
+  --stage asset_planning \
+  --out /path/to/UIProduction/reports/production_preview_lineage_report.json \
+  --report-md /path/to/UIProduction/reports/production_preview_lineage_report.md
+
+python scripts/validate_typography_fidelity.py \
+  --root /path/to/UIProduction \
+  --stage asset_planning \
+  --out /path/to/UIProduction/reports/typography_fidelity_report.json \
+  --report-md /path/to/UIProduction/reports/typography_fidelity_report.md
 
 python scripts/validate_visual_part_coverage.py \
   --root /path/to/UIProduction \
@@ -244,8 +281,34 @@ python scripts/record_design_approval.py \
 ### 检查切图
 
 ```text
-使用 fairygui-ui-pipeline skill，检查 generated/sliced 里的 PNG 是否和 asset_manifest.json 对得上，然后生成 cut_report.json。
+使用 fairygui-ui-pipeline skill，检查 generated/sliced 或包内 art 里的 PNG 是否和 asset_manifest.json 对得上，然后生成 cut_report.json。每个 approved_sheet_slice 资源必须记录实际打开的 sourceFile、crop、output file、derivationMode、sourceSha256、outputSha256；deterministic_transform 还要记录 processorScript 和 processorScriptSha256。禁止脚本读取 _alpha/_clean sheet，但报告和 Manifest 仍登记原始 sheet。
 ```
+
+### 生成并确认最终生产预览
+
+资源切图和包内暂存完成后，使用 `production_preview_lineage.json` 指向的运行时原文件拼装最终预览。每张图还必须填写 `sourceLineage`，准确区分精确源文件、精确裁切和参考重建。文字必须读取 `typography_spec.json`，并在同一次渲染中写出 `reports/typography_render_trace.json`。
+
+先创建待确认记录：
+
+```bash
+python scripts/record_production_preview_approval.py \
+  --root /path/to/UIProduction \
+  --action pending \
+  --note "等待用户确认最终运行时资源和字体效果"
+```
+
+用户明确确认该生产预览后：
+
+```bash
+python scripts/record_production_preview_approval.py \
+  --root /path/to/UIProduction \
+  --action approve \
+  --confirmation-type user_confirmation \
+  --recorded-by user \
+  --note "用户确认这张生产预览以及对应运行时资源集合"
+```
+
+批准后若任一 PNG、切图、字体参数或生产预览发生变化，必须 supersede 并重新确认。
 
 ### 生成 FairyGUI 拼装计划，不生成 XML
 
@@ -324,6 +387,8 @@ UIProduction/
 │   ├── ui_spec.md
 │   ├── visual_design_brief.md
 │   ├── component_visual_parts.json
+│   ├── production_preview_lineage.json
+│   ├── typography_spec.json
 │   └── fgui_spec.md
 ├── manifests/
 │   ├── asset_manifest.json
@@ -354,6 +419,15 @@ UIProduction/
     ├── display_list_z_order_report.md
     ├── bitmap_asset_provenance_report.json
     ├── bitmap_asset_provenance_report.md
+    ├── asset_isolation_report.json
+    ├── asset_isolation_report.md
+    ├── asset_isolation_review.md
+    ├── production_preview_approval.json
+    ├── production_preview_lineage_report.json
+    ├── production_preview_lineage_report.md
+    ├── typography_render_trace.json
+    ├── typography_fidelity_report.json
+    ├── typography_fidelity_report.md
     ├── visual_part_coverage_report.json
     ├── visual_part_coverage_report.md
     ├── pipeline_stage_timings.json
@@ -455,6 +529,38 @@ python scripts/validate_bitmap_asset_provenance.py \
   --report-md /path/to/UIProduction/reports/bitmap_asset_provenance_report.md
 ```
 
+资源隔离校验：
+
+```bash
+python scripts/validate_asset_isolation.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --xml-dir /path/to/UIProduction/fgui_xml/cooking \
+  --out /path/to/UIProduction/reports/asset_isolation_report.json \
+  --report-md /path/to/UIProduction/reports/asset_isolation_report.md
+```
+
+生产预览与运行时资源同源校验：
+
+```bash
+python scripts/validate_production_preview_lineage.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --out /path/to/UIProduction/reports/production_preview_lineage_report.json \
+  --report-md /path/to/UIProduction/reports/production_preview_lineage_report.md
+```
+
+字体规格同源校验：
+
+```bash
+python scripts/validate_typography_fidelity.py \
+  --root /path/to/UIProduction \
+  --stage xml_generation \
+  --xml-dir /path/to/UIProduction/fgui_xml/cooking \
+  --out /path/to/UIProduction/reports/typography_fidelity_report.json \
+  --report-md /path/to/UIProduction/reports/typography_fidelity_report.md
+```
+
 组件复用与参数化校验：
 
 ```bash
@@ -536,12 +642,15 @@ run_tests.cmd
 - `references/component-reuse-parameterization-contract.md` 负责优先合并同构组件、声明基组件与参数字段、抽取可复用子组件，并阻止内容差异被错误拆成 XML 变体。
 - `references/display-list-z-order-contract.md` 负责约束 FairyGUI XML 从后到前的绘制顺序，防止背景或大组件放在后部覆盖内容。
 - `references/bitmap-icon-source-contract.md` 负责禁止矢量/程序化图标替代，要求小图标来自审核位图并保留来源证据。
+- `references/asset-isolation-contract.md` 负责禁止整屏设计稿充当运行时背景、禁止普通矩形裁剪伪装成抠图或修复、要求人物和图标真正透明隔离，并禁止面板或按钮皮肤烘焙动态文字与可复用子内容；它还要求资源预览图、实际切图源、crop、输出及处理脚本通过 `cut_report.json` 和哈希形成可验证链路。
+- `references/production-preview-lineage-contract.md` 负责确保最终预览使用包内同一份运行时图片，同时记录每张图与批准图/用户源图的关系及确定性派生方式，并通过第二次人工确认冻结预览和全部资源哈希；设计稿确认不能替代该门禁。
+- `references/typography-fidelity-contract.md` 负责让最终预览与 XML 共用一个字体规格，覆盖字体、字号、颜色、对齐、字距、描边、阴影、文本框和本地化映射，并通过 `typography_render_trace.json` 证明预览渲染确实消费了当前规格。
 - `references/component-instance-configuration-contract.md` 负责防止不同语义的复用实例全部落到同一个默认页面，并约束外部覆盖、Controller 页面、运行时绑定、结构性变体和可读预览文本。
 - `references/visual-part-coverage-contract.md` 负责把确认设计稿里的每个必需可见部件映射到 Manifest 和 XML；角色名、部件角色和项目业务名称全部来自项目文件，不在 Skill 中写死。
 - `references/pipeline-stage-timing-contract.md` 负责标准阶段编号、主动/等待/外部时间分类、返工尝试保留和最终耗时报告；流程开始前必须初始化，结束后必须 finalize 与 validate。
 - `references/xml-strict-generation.md` 是 XML 生成前的章节覆盖清单，不允许跳过。
-- imagegen 和 FairyGUI XML 都要经过人工检查点。
-- XML 生成顺序必须是：注册并冻结 ID → 暂存完整包资源 → 校验包内路径 → `package.xml` → 可参数化叶子/子组件 → 基础复合组件 → 经结构校验允许的变体 → 主界面。
+- imagegen、设计稿、最终生产预览和 FairyGUI XML 都要经过对应人工检查点。
+- XML 生成顺序必须是：注册并冻结 ID → 暂存完整包资源 → 使用这些原文件和统一字体规格生成生产预览 → 人工确认并冻结哈希 → 校验包内路径 → `package.xml` → 可参数化叶子/子组件 → 基础复合组件 → 经结构校验允许的变体 → 主界面。
 - 每次生成前写入 `reports/xml_generation_input_snapshot.json`，防止生成期间 Manifest 或 Registry 被悄悄修改。
 - XML 草稿必须经过 FairyGUI 编辑器打开、按设计分辨率截图并与确认设计稿对照、发布、Unity 加载测试后，才算最终可用。
 - 视觉对照必须确认没有重复默认头像/图标、空白按钮、白色占位块、原始本地化 Key 或漏掉的实例状态。

@@ -8,7 +8,7 @@ Do not generate FairyGUI XML directly from a design image.
 
 When the design was generated from requirements or design documents, first run `scripts/check_design_approval.py --stage layout_analysis`. A draft, pending, rejected, superseded, modified, or AI-self-approved image is not a valid layout source.
 
-Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md`, `references/semantic-controller-mapping-contract.md`, and `references/component-reuse-parameterization-contract.md` first and use `component_state_map.json` as the semantic source of truth. Components with the same hierarchy must share a base component even when their titles, icons, portraits, values, colors, sizes, or default pages differ. Also read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json` before asset planning, so small icons, frames, title decorations, backgrounds, separators, and markers cannot disappear between layout analysis and XML.
+Do not treat visual boxes as semantic truth. When requirements exist, read `references/uxui-semantic-contract.md`, `references/semantic-controller-mapping-contract.md`, and `references/component-reuse-parameterization-contract.md` first and use `component_state_map.json` as the semantic source of truth. Components with the same hierarchy must share a base component even when their titles, icons, portraits, values, colors, sizes, or default pages differ. Also read `references/visual-part-coverage-contract.md` and create `component_visual_parts.json` before asset planning, so small icons, frames, title decorations, backgrounds, separators, and markers cannot disappear between layout analysis and XML. Read `references/asset-isolation-contract.md` before assigning slice policies: the complete mockup is not a runtime background or universal crop sheet, and a crop cannot remove UI, create transparency, clean neighboring pixels, or reconstruct hidden content by itself.
 
 Keep this contract generic. It defines required files, fields, gates, and review rules. It must not contain project-specific screen names, concrete coordinates, asset file names, package IDs, resource IDs, or component instance IDs. Store those in the active project's `UIProduction` directory.
 
@@ -25,6 +25,9 @@ requirement document + approved design image + design_approval.json
 -> user or visual QA confirmation
 -> slice_plan.json
 -> asset_manifest.json / fgui_id_registry.json
+-> production_preview_lineage.json / typography_spec.json
+-> exact production preview assembled from staged runtime assets
+-> production_preview_approval.json
 -> fgui_spec.md
 -> XML draft generation
 -> XML validation and FairyGUI editor check
@@ -42,6 +45,8 @@ For project-specific work, store these beside the project's UI production specs,
 - `component_visual_parts.json`: machine-readable inventory of every required visible part, implementation mode, Manifest asset or XML node, file scope, complexity, and fallback policy.
 - `layout_spec.json`: canvas, regions, objects, slots, coordinate source, confidence, and review status.
 - `slice_plan.json`: exact crop candidates, extraction method, output names, and whether a crop is automatic, cleanup-required, or forbidden.
+- `production_preview_lineage.json`: exact mapping from every runtime bitmap to its usage in the final production preview.
+- `typography_spec.json`: deterministic text styles and component-local text bounds shared by preview and XML.
 - `layout_overlay_preview.png`: visual overlay of regions and object boxes on the design image.
 
 Do not store these project-specific outputs inside the reusable skill unless they are deliberately generic examples with placeholder names and no real project IDs.
@@ -139,14 +144,25 @@ Every slice entry must say whether it is safe to cut from the design image.
 
 Allowed extraction modes:
 
-- `direct_crop`: static area with no dynamic objects or baked text.
-- `crop_after_cleanup`: usable only after removing overlapping objects and verifying edges.
-- `from_sheet`: source should be generated/sliced from transparent asset sheet.
+- `direct_crop`: static, already self-contained area cut directly from an approved full-screen design; no dynamic objects, neighboring pixels, baked text, occlusion, or required alpha extraction.
+- `exact_crop`: runtime pixels are exactly `[x,y,width,height]` from the declared approved resource-preview sheet, with no resize, cleanup, or reinterpretation.
+- `deterministic_transform`: a declared and hash-frozen processor performs trim, alpha cleanup, resize, or another reproducible transform from the exact declared resource-preview sheet.
+- `crop_after_cleanup`: planning-only label before a concrete processor exists; it must be resolved to `deterministic_transform` with script evidence before `sheet_slicing`.
+- `from_sheet`: planning-only source classification; it is not a final derivation mode and must become `exact_crop` or `deterministic_transform` for every `approved_sheet_slice` asset.
 - `from_existing_fgui`: source already exists in a FairyGUI package.
-- `do_not_slice`: dynamic, stateful, interactive, or runtime content.
+- `image_generation_with_reference`: separately generated clean background, isolated subject/icon, or content-free skin using the approved design as reference.
+- `manual_reconstruction`: reviewed reconstruction with explicit evidence.
+- `inpainted_environment`: reviewed environment-only result that reconstructs pixels hidden by UI or subjects.
+- `do_not_slice`: dynamic, stateful, interactive, runtime content, or a full-screen reference-only image.
+
+For every final `approved_sheet_slice` row, `sourceFile`, `crop`, `output`, and `extractionMode` must exactly match Manifest and `cut_report.json`. The source file must be the actual bitmap opened by the slicer, including any `_alpha` or `_clean` suffix.
 
 Forbidden direct slicing from a flat design image:
 
+- the complete approved design as a runtime environment background
+- backgrounds whose UI/characters must be removed or whose hidden pixels must be reconstructed
+- portraits, characters, icons, badges, or emblems that require transparent isolation or neighbor cleanup
+- panel, card, row, bar, frame, or button skins that include dynamic text, values, state content, or reusable child components
 - button pressed/disabled/hover states
 - controller states not visible in the screenshot
 - customer expression states
@@ -173,6 +189,9 @@ Main panel XML cannot be generated from a design image unless all are available 
 - a passing `scripts/validate_component_reuse.py --stage xml_generation` report
 - a passing `scripts/validate_display_list_z_order.py --stage xml_generation` report
 - a passing `scripts/validate_bitmap_asset_provenance.py --stage xml_generation` report
+- a passing `scripts/validate_asset_isolation.py --stage xml_generation` report and human `asset_isolation_review.md`
+- a passing `scripts/validate_production_preview_lineage.py --stage xml_generation` report and human `production_preview_approval.json`
+- a passing `scripts/validate_typography_fidelity.py --stage xml_generation` report
 - a passing `scripts/validate_visual_part_coverage.py --stage xml_generation` report
 - full FairyGUI XML parsing specification
 - either `layout_overlay_preview.png` reviewed, or a written risk acceptance that overlay review was skipped
@@ -192,6 +211,13 @@ When reviewing a design-to-layout pass, report:
 - regions and slots with low confidence
 - objects marked `do_not_slice`
 - crops requiring cleanup
+- slice rows whose reason claims transparent isolation, UI removal, separated text, clean background, or reconstruction while the extraction method is only a rectangular crop
+- full-screen mockups incorrectly registered as runtime backgrounds or package assets
+- portraits/icons with opaque screenshot rectangles or neighboring pixels
+- panel/button/frame skins containing baked dynamic text or child component content
+- final preview assets that are look-alike regenerated resources rather than exact staged runtime files
+- production assets changed after production-preview approval
+- preview scripts and XML using different font identities, sizes, colors, spacing, strokes, shadows, or text bounds
 - mismatches between the approved design file and `layout_spec.json.sourceImages`
 - changed design bytes whose SHA-256 no longer matches approval
 - image objects whose `assetName` is missing or unresolved

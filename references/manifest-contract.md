@@ -19,6 +19,9 @@ Recommended top-level shape:
     "generateFullScreenDesign": true,
     "requiresDesignApproval": true,
     "requiresVisualPartCoverage": true,
+    "requiresAssetIsolation": true,
+    "requiresProductionPreviewLineage": true,
+    "requiresTypographyFidelity": true,
     "generateVisualAssets": true,
     "requiresVisualReference": true
   },
@@ -50,7 +53,11 @@ Recommended top-level shape:
   "cols": 5,
   "cellSize": [256, 256],
   "padding": [0, 0, 0, 0],
-  "items": ["food_patty_raw", "food_patty_cooked"]
+  "items": ["food_patty_raw", "food_patty_cooked"],
+  "reviewStatus": "approved",
+  "reviewedBy": "user",
+  "reviewType": "user_confirmation",
+  "reviewEvidence": "reports/asset_isolation_review.md"
 }
 ```
 
@@ -60,6 +67,8 @@ Rules:
 - Sheet names and files use lowercase snake_case.
 - Keep one logical asset per cell.
 - Do not place backgrounds and isolated transparent objects in the same sheet.
+- A sheet used by `approved_sheet_slice` must be the exact approved resource-preview bitmap, exist under its declared `file`, and record human `reviewStatus`, `reviewedBy`, `reviewType`, and `reviewEvidence`.
+- A processed `_alpha`, `_clean`, resized, or otherwise changed bitmap is a different sheet source and must be registered under its real filename.
 
 ## Asset Object
 
@@ -81,6 +90,17 @@ Rules:
     "sourceFile": "generated/sheets/sheet_food_5x4.png",
     "crop": [0, 0, 256, 256],
     "reviewStatus": "approved"
+  },
+  "assetIsolation": {
+    "role": "isolated_subject",
+    "requiresTransparentBackground": true,
+    "forbidNeighborPixels": true,
+    "sourceRegionContainsOnlyAsset": true,
+    "forbidBakedText": true,
+    "reviewStatus": "approved",
+    "reviewedBy": "user",
+    "reviewType": "user_confirmation",
+    "reviewEvidence": "reports/asset_isolation_review.md"
   },
   "pivot": "center",
   "sheet": "sheet_food_5x4",
@@ -121,7 +141,7 @@ asset.file == package.outputPath + "/" + asset.packageRelativeFile
 
 `file` is relative to the `UIProduction` root. `packageRelativeFile` is relative to the directory containing `package.xml` and is the only path allowed in fresh component XML `fileName`. Do not write the full `asset.file` value into `package.xml` or component XML.
 
-When `production.generateFullScreenDesign=true`, both `production.requiresDesignApproval` and `production.requiresVisualPartCoverage` must be true. Read `references/design-mockup-approval-contract.md`, generate the complete-screen mockup, obtain a passing approval record, create `specs/component_visual_parts.json`, and complete reusable-component planning under `references/component-reuse-parameterization-contract.md` before finalizing the production manifest or entering downstream stages.
+When `production.generateFullScreenDesign=true`, `production.requiresDesignApproval`, `production.requiresVisualPartCoverage`, `production.requiresAssetIsolation`, `production.requiresProductionPreviewLineage`, and `production.requiresTypographyFidelity` must all be true. Read the design-approval, asset-isolation, production-preview-lineage, typography-fidelity, visual-part, and component-reuse contracts before finalizing the production manifest or entering downstream stages.
 
 ## Visual Part Coverage
 
@@ -136,6 +156,44 @@ Every small art-directed icon asset must include `assetSource` according to `ref
 Allowed production sources are approved design/sheet slices, user-provided bitmaps, existing package bitmaps, or reference-driven image generation with an approval record. Programmatic Graph/SVG/font-glyph/PIL geometry is forbidden for production icons even when it is rasterized to PNG.
 
 Run `scripts/validate_bitmap_asset_provenance.py` before resource generation and XML readiness.
+
+## Asset Isolation
+
+The approved full-screen mockup is a reference-only composition image. It must not be registered as a runtime background or used as a universal rectangular crop sheet.
+
+When `production.requiresAssetIsolation=true`, every bitmap must declare `assetIsolation`. Roles are:
+
+- `environment_background`
+- `isolated_subject`
+- `isolated_icon`
+- `decorative_frame`
+- `component_skin`
+- `full_screen_reference_only`
+
+Clean backgrounds must contain environment only. Isolated subjects/icons normally require transparent pixels, forbid neighboring screenshot content, and declare that the source region contains only the intended asset. Frames and skins must set `forbidBakedText=true`, `containsBakedText=false`, and `containsDynamicChildContent=false` when text and child content are produced by FairyGUI.
+
+A plain rectangular crop cannot claim UI removal, alpha extraction, neighbor cleanup, baked-text removal, or reconstruction of hidden pixels. For `approved_sheet_slice`, the per-asset `slice_plan` row and `cut_report.json` row must repeat the exact Manifest `sourceFile`, `crop`, and output path. The cut report must freeze source/output SHA-256 and, for `deterministic_transform`, the processor script and its SHA-256. Run `scripts/validate_asset_isolation.py` after resource generation and before XML readiness; retain `reports/asset_isolation_review.md` as human evidence.
+
+## Production Preview Lineage
+
+The design mockup approval does not approve separately generated runtime assets as exact matches. Create `specs/production_preview_lineage.json`, assemble the final preview from exact staged `asset.file` values, and use `reports/production_preview_approval.json` to freeze the preview plus every runtime bitmap SHA-256. Read `references/production-preview-lineage-contract.md`.
+
+Every runtime bitmap must also declare `sourceLineage` in the lineage file:
+
+- `designRelation`: `exact_approved_source`, `exact_provided_source`, or `reference_reconstruction`.
+- `derivationMode`: `exact_file`, `exact_crop`, or `deterministic_transform`.
+- `sourceFile` and frozen `sourceSha256`.
+- `crop` for exact crop.
+- `transformScript` plus frozen script hash for deterministic transform.
+- `reconstructionReason` whenever the approved/provided image cannot be used exactly.
+
+Use exact provided/self-contained sources before image generation. A generated sheet is not an exact approved-design slice; it must declare reference reconstruction relative to the approved screen.
+
+No runtime image, source, crop, transform script, or production preview may be changed after production-preview approval without superseding that approval.
+
+## Typography Fidelity
+
+Create `specs/typography_spec.json` and use it as the single source for both final preview text and FairyGUI XML text/richtext attributes. Image-model text is reference-only. Exact production text must declare font identity, font size, color, alignment, auto-size, single-line behavior, optional spacing/stroke/shadow, component-local bounds, preview text, and localization mapping. A deterministic preview renderer must write `reports/typography_render_trace.json` in the same run, freezing the current Typography Spec hash and the resolved attributes/bounds/text of every rendered instance. Read `references/typography-fidelity-contract.md`.
 
 Recommended pivot values:
 

@@ -197,7 +197,7 @@ Rules:
 
 ## Stage 8: Asset and Sheet Planning
 
-Run the approval gate for `asset_planning`, read `references/visual-reference-contract.md`, `references/asset-size-contract.md`, and `references/bitmap-icon-source-contract.md`, then create `manifests/asset_manifest.json` and `specs/sheet_plan.md`.
+Run the approval gate for `asset_planning`, read `references/visual-reference-contract.md`, `references/asset-size-contract.md`, `references/bitmap-icon-source-contract.md`, `references/asset-isolation-contract.md`, `references/production-preview-lineage-contract.md`, and `references/typography-fidelity-contract.md`, then create `manifests/asset_manifest.json`, `specs/sheet_plan.md`, `specs/production_preview_lineage.json`, and `specs/typography_spec.json`.
 
 The manifest owns:
 
@@ -213,14 +213,23 @@ The manifest owns:
 - transparent/trim/padding requirements
 - FairyGUI package/layer/component mapping
 - approved bitmap provenance in `assetSource` for every icon-like asset
+- `production.requiresAssetIsolation=true` for complete-screen projects
+- `production.requiresProductionPreviewLineage=true` and `production.requiresTypographyFidelity=true`
+- per-bitmap `assetIsolation`: role, transparency requirement, neighbor-pixel policy, baked-content policy, source containment, occlusion policy, review status, and review evidence
+- exact preview usage and runtime-file identity for every bitmap
+- per-bitmap `sourceLineage`: exact approved source, exact provided source, or reference reconstruction; exact file/crop or deterministic transform; source and transform hashes
+- deterministic text style and bounds for every text instance, including `hostComponentFile`/`hostInstanceName` when a reused Button/Label instance overrides title style
+- deterministic typography render-trace path and per-instance render evidence
 
 The sheet plan owns:
 
+- exact resource-preview sheet file paths
 - sheet dimensions
 - row/column layout
 - per-cell item list
 - imagegen prompt batches
 - negative prompt constraints
+- human review target/evidence for every sheet used by `approved_sheet_slice`
 
 ## Stage 9: Production Image Generation
 
@@ -243,6 +252,21 @@ Do not use image generation for:
 
 Always keep production sheets simple: one item per cell, no cross-cell shadows, no baked labels.
 
+The complete approved UI mockup is a composition reference, not a runtime background or universal crop sheet. Generate or reconstruct clean environment-only backgrounds separately. Portraits and icons must be genuinely isolated; panels, frames, bars, rows, cards, and buttons must not include dynamic text, state values, or reusable child content.
+
+A new image-generation call after design approval may create production assets, but those assets are only candidates until the final production preview is assembled from their exact staged files. Do not approve a newly generated full-screen reinterpretation as though it proved which runtime pixels will ship.
+
+Before regenerating anything, apply source priority:
+
+1. exact user/project-provided production bitmap;
+2. exact self-contained crop from the approved design;
+3. deterministic transform of a frozen source;
+4. reference reconstruction only when exact extraction is impossible.
+
+Record the chosen relation and derivation in `production_preview_lineage.json.assets[].sourceLineage`. Reference reconstruction requires an explicit reason and may not claim pixel identity with the approved design.
+
+Run `scripts/validate_asset_isolation.py --root UIProduction --stage resource_generation` after bitmap output and before assembly. The automated report and `reports/asset_isolation_review.md` must pass.
+
 ## Stage 10: Sheet Slicing
 
 Input:
@@ -258,6 +282,10 @@ Output:
 
 Acceptance checks:
 
+- every `approved_sheet_slice` has one final per-asset slice row using `exact_crop` or `deterministic_transform`
+- `manifest.sheets[].file`, `assetSource.sourceFile`, `slice_plan.sourceImages/sourceFile`, `cut_report.outputs[].sourceFile`, and `sourceLineage.sourceFile` identify the same actual resource-preview bitmap
+- processed `_alpha`/`_clean` sheets are registered and reviewed under their real filenames
+- `cut_report.json` freezes exact crop, output path, source/output hashes, and processor-script hash when applicable
 - file names match manifest
 - transparent background exists where required
 - object is not cropped
@@ -267,6 +295,13 @@ Acceptance checks:
 - target FairyGUI size equals `displaySize`
 - scaling behavior is explicitly declared by `scalePolicy`
 - dimensions and pivots match manifest
+- no full-screen UI is embedded in a background
+- no portrait/icon is an opaque rectangular screenshot crop
+- no panel/button/frame skin contains baked dynamic text or reusable child content
+- every sliced output is the exact file that will be staged and used by the production preview
+- `production_preview_lineage.json` records the staged file, source relation, derivation mode, source/crop/transform evidence, and future SHA-256
+- exact crops are pixel-equal to the declared source region; deterministic transforms freeze and identify the real processor; generated-sheet outputs declare reference reconstruction relative to the approved screen
+- `validate_asset_isolation.py --stage sheet_slicing` passes with review evidence
 
 ## Stage 11: FairyGUI Assembly Planning
 
@@ -296,7 +331,7 @@ It must include:
 - Unity binding fields
 - automation risk notes
 
-Before XML readiness, run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_component_reuse.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_display_list_z_order.py --root UIProduction --stage fairygui_assembly`, and `scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage fairygui_assembly`. Missing Controller exports/parameters, Gear rows, reuse plans, back-to-front layer declarations, bitmap provenance, or justified structural differences are blockers.
+Before XML readiness, run `scripts/validate_semantic_controller_mapping.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_component_reuse.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_display_list_z_order.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_asset_isolation.py --root UIProduction --stage fairygui_assembly`, `scripts/validate_production_preview_lineage.py --root UIProduction --stage fairygui_assembly`, and `scripts/validate_typography_fidelity.py --root UIProduction --stage fairygui_assembly`. Missing Controller exports/parameters, Gear rows, reuse plans, back-to-front layer declarations, bitmap provenance, resource isolation evidence, exact preview lineage, deterministic typography, or justified structural differences are blockers.
 
 ## Stage 12: FairyGUI Package Resource Staging
 
@@ -312,6 +347,16 @@ For each file-backed resource:
 
 The package directory is an atomic import bundle. Do not copy XML and image files through unrelated partial lists.
 
+After staging, assemble `generated/preview/<screen>_production.png` from the exact package files. Render text from `specs/typography_spec.json` or capture the actual FairyGUI component; do not hardcode a separate font/color/size table in the preview script. Reused Button/Label instances with different title styles must materialize matching parent `titleFontSize/titleColor/title` overrides and declare their host instance in the Typography Spec. For deterministic overlays, the same render execution must write `reports/typography_render_trace.json` with the current typography-spec SHA-256 and one exact entry per rendered text instance.
+
+Create a pending production-preview approval record and stop:
+
+```bash
+python scripts/record_production_preview_approval.py --root UIProduction --action pending --note "Waiting for exact production preview approval"
+```
+
+After explicit human approval, record the preview and runtime-asset hashes. Any subsequent asset or typography change supersedes that approval.
+
 Example:
 
 ```text
@@ -324,7 +369,7 @@ Only `art/icon_anvil.png` may be used by package-local XML.
 
 ## Stage 13: XML Draft Generation
 
-Before generation, run `scripts/validate_semantic_controller_mapping.py --stage xml_generation`, `scripts/validate_component_reuse.py --stage xml_generation`, `scripts/validate_display_list_z_order.py --stage xml_generation`, `scripts/validate_bitmap_asset_provenance.py --stage xml_generation`, and `scripts/validate_visual_part_coverage.py --stage xml_generation`, then run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
+Before generation, run `scripts/validate_semantic_controller_mapping.py --stage xml_generation`, `scripts/validate_component_reuse.py --stage xml_generation`, `scripts/validate_display_list_z_order.py --stage xml_generation`, `scripts/validate_bitmap_asset_provenance.py --stage xml_generation`, `scripts/validate_asset_isolation.py --stage xml_generation`, `scripts/validate_production_preview_lineage.py --stage xml_generation`, `scripts/validate_typography_fidelity.py --stage xml_generation`, and `scripts/validate_visual_part_coverage.py --stage xml_generation`, then run `scripts/check_xml_readiness.py`. Use `--require-design-approval` when the full-screen design was generated from requirements/design documents, use `--resource-generation` when this pipeline generated or redrew visual assets, and use `--design-driven` when a design image is part of the layout source. Stop on any blocker.
 
 Generate:
 
@@ -334,6 +379,15 @@ Generate:
 - `reports/display_list_z_order_report.md`
 - `reports/bitmap_asset_provenance_report.json`
 - `reports/bitmap_asset_provenance_report.md`
+- `reports/asset_isolation_report.json`
+- `reports/asset_isolation_report.md`
+- `reports/asset_isolation_review.md`
+- `reports/production_preview_approval.json`
+- `reports/production_preview_lineage_report.json`
+- `reports/production_preview_lineage_report.md`
+- `reports/typography_render_trace.json`
+- `reports/typography_fidelity_report.json`
+- `reports/typography_fidelity_report.md`
 - `reports/xml_readiness_report.json`
 - `reports/xml_generation_input_snapshot.json`
 - `fgui_xml/<package>/package.xml`
@@ -349,6 +403,9 @@ Rules:
 - Register every referenced component/image in `package.xml`.
 - Emit each component `<displayList>` back-to-front: opaque backgrounds first, normal content next, transparent frames/overlays only after content.
 - Never synthesize art-directed icons with Graph, SVG, font glyphs, PIL/ImageDraw, or other procedural vector-like drawing; use only approved bitmap sources recorded in Manifest.
+- Never stage the complete approved design as a runtime background. Reject plain crop scripts that claim alpha extraction, UI removal, neighbor cleanup, text removal, or occlusion reconstruction. Require clean environment backgrounds, truly isolated subjects/icons, and content-free component skins.
+- Never generate XML from an independently reinterpreted preview. The approved production preview must be composed from exact staged runtime assets, every asset must have valid source-lineage evidence, and its approval must still match all frozen hashes.
+- Generate every text/richtext attribute and bound from `typography_spec.json`. The final preview renderer must use the same spec and produce a matching render trace; image-model lettering and unrelated hardcoded system-font settings are not XML truth.
 - For external `<Button .../>` and `<Label .../>` instance parameters, require the target component `extention` to match, validate allowed fields, and resolve all `ui://` values.
 - For each visual instance, materialize the declared implementation mode. Prefer `extension_override`, `controller_pages`, `runtime_binding`, or reusable children. `controller_pages` requires one exported target Controller, declared `controllerParameters`, and exact parent `controller="name,pageIndex"`. `variant_component` requires `reusePlan.strategy=variant_allowed`, a valid `variantJustification`, and a materially different XML structure; `static_default` is allowed only for intentionally identical instances.
 - For each required visual part, materialize the declared Manifest asset or XML node. Detailed Graph fallbacks require explicit human approval.
@@ -363,7 +420,7 @@ Rules:
 
 ## Stage 14: Validation
 
-Run `scripts/validate_pipeline.py` and write `reports/pipeline_validate_report.json`. Also retain the dedicated component-reuse, display-list z-order, bitmap-provenance, and visual-part reports.
+Run `scripts/validate_pipeline.py` and write `reports/pipeline_validate_report.json`. Also retain the dedicated component-reuse, display-list z-order, bitmap-provenance, asset-isolation, production-preview-lineage, typography-fidelity, and visual-part reports.
 
 Run `scripts/validate_fgui_xml.py` with `--manifest`, `--registry`, and `--mode fresh` for new XML. The validator must resolve every `package.xml path + name` and image `fileName` against the exact package directory; basename-only matches are forbidden in fresh mode. After FairyGUI editor cleanup/export, rerun with `--mode editor-compatible` and keep a separate report.
 
@@ -381,6 +438,10 @@ Also manually inspect:
 - components that differ only by content or instance size use one base component plus parameters rather than duplicate XML variants
 - repeated icon-plus-value, icon-plus-title, badge, row, or panel-shell structures are extracted as reusable child components when appropriate
 - all required visual parts from `component_visual_parts.json` are visible, including small icons and non-interactive framing/decorative elements
+- backgrounds contain environment only; isolated portraits/icons have clean alpha and no neighboring screenshot pixels; panel/button/frame skins contain no baked dynamic text or duplicate child content
+- the visual preview uses the exact runtime asset files, not look-alike regenerated resources
+- every exact source/crop claim is verified; every reconstructed asset is labeled as reconstruction and justified
+- font identity, size, color, alignment, spacing, stroke/shadow, and text boxes match `typography_spec.json`, `typography_render_trace.json`, and XML
 - no white placeholder blocks, blank buttons, raw localization keys, duplicated default content, or silently omitted frames/titles/icons remain
 - list default item URLs
 

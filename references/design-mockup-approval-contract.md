@@ -80,6 +80,10 @@ A design mockup should show the complete screen composition, functional areas, v
 
 Do not treat the mockup as production-ready sliced art. Dynamic objects, state variants, text, list items, and interaction feedback still require semantic analysis and production-safe assets.
 
+This approval confirms the design proposal's composition, hierarchy, style direction, and approximate asset appearance. It does not certify that separately generated background, portrait, icon, panel, or button files are pixel-identical to the mockup. Exact production resources require the later gate in `references/production-preview-lineage-contract.md`.
+
+Image-model-generated lettering is also reference-only. Exact font family, size, color, spacing, stroke, shadow, and text bounds must be defined later by `references/typography-fidelity-contract.md`.
+
 ## Approval Record
 
 Use `reports/design_approval.json`. Create a pending record deterministically after generating a candidate:
@@ -170,7 +174,9 @@ A design may be approved for one or more stages:
 
 The requested next stage must appear in `approvedFor`.
 
-Recommended default after the user approves the final full-screen design is to approve all downstream stages. If the user approves only visual direction but not exact layout, limit approval to the explicitly accepted scope.
+Recommended default after the user approves the final full-screen design is to approve all downstream analysis and production-planning stages. Even when `fairygui_assembly` or `xml_generation` appears in `approvedFor`, XML readiness still requires a separate exact production-preview approval and typography-fidelity pass. Design approval cannot substitute for those gates.
+
+If the user approves only visual direction but not exact layout, limit approval to the explicitly accepted scope.
 
 ## Hard Blocking Rules
 
@@ -213,3 +219,5 @@ After approval:
 - input snapshots must include the approved design image and approval record
 
 The primary reference image remains an art/style source. The approved full-screen design becomes the screen composition and layout source.
+
+After production resources exist, assemble a second preview from the exact staged runtime files and deterministic typography. Human approval of that production preview freezes the runtime-asset set and is the final visual source for XML fidelity checks.

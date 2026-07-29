@@ -29,10 +29,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_asset_isolation import validate as validate_asset_isolation
 from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
 from validate_component_reuse import validate as validate_component_reuse
 from validate_display_list_z_order import validate as validate_display_list_z_order
+from validate_production_preview_lineage import validate as validate_production_preview_lineage
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
+from validate_typography_fidelity import validate as validate_typography_fidelity
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9]{8}$")
@@ -67,6 +70,9 @@ EXTENSION_OVERRIDE_REQUIRED_CHILD_NAMES = {
     "icon": "icon",
     "selectedIcon": "icon",
 }
+BUTTON_MODES = {"common", "check", "radio"}
+BUTTON_DOWN_EFFECTS = {"none", "color", "darken", "scale"}
+BUTTON_CONTROLLER_PAGE_NAMES = ["up", "down", "over", "disabled"]
 
 PLACEHOLDERS = [
     "包ID",
@@ -214,6 +220,156 @@ def parse_size(value: str | None) -> list[int] | None:
 def normalize_relative_path(value: str) -> Path:
     normalized = str(PurePosixPath(value.replace("\\", "/"))).lstrip("./")
     return Path(*PurePosixPath(normalized).parts)
+
+
+def parse_controller_page_pairs(controller: ET.Element) -> tuple[list[tuple[str, str]], str | None]:
+    raw_pages = controller.attrib.get("pages", "")
+    tokens = [token.strip() for token in raw_pages.split(",") if token.strip()]
+    if not tokens:
+        return [], "Controller 缺少 pages"
+    if len(tokens) % 2 != 0:
+        return [], f"Controller@pages 必须是 pageId,pageName 成对序列: {raw_pages}"
+    pairs = list(zip(tokens[0::2], tokens[1::2]))
+    page_ids = [page_id for page_id, _ in pairs]
+    page_names = [page_name for _, page_name in pairs]
+    if len(set(page_ids)) != len(page_ids):
+        return [], f"Controller@pages 含重复 pageId: {raw_pages}"
+    if len(set(page_names)) != len(page_names):
+        return [], f"Controller@pages 含重复 pageName: {raw_pages}"
+    return pairs, None
+
+
+def validate_controller_element(
+    path: Path,
+    root: ET.Element,
+    controller: ET.Element,
+    mode: str,
+    issues: list[dict[str, str]],
+) -> None:
+    name = controller.attrib.get("name", "")
+    if not name:
+        issues.append(issue("error", path, "controller 缺少 name"))
+
+    pairs, parse_error = parse_controller_page_pairs(controller)
+    if parse_error:
+        issues.append(issue("error", path, parse_error))
+        return
+
+    page_ids = [page_id for page_id, _ in pairs]
+    page_names = [page_name for _, page_name in pairs]
+    numeric_ids = all(page_id.isdigit() for page_id in page_ids)
+    if mode == "fresh" and not numeric_ids:
+        issues.append(
+            issue(
+                "error",
+                path,
+                f"新生成 Controller 必须使用数字 pageId,pageName 成对序列: {controller.attrib.get('pages', '')}",
+            )
+        )
+    elif mode == "editor-compatible" and not numeric_ids:
+        issues.append(
+            issue(
+                "warning",
+                path,
+                f"编辑器 Controller 使用非数字 pageId，请确认是有效导出结果: {controller.attrib.get('pages', '')}",
+            )
+        )
+
+    selected = controller.attrib.get("selected")
+    if selected is None:
+        if mode == "fresh":
+            issues.append(issue("error", path, f"新生成 Controller 必须显式声明 selected: {name}"))
+    else:
+        try:
+            selected_index = int(selected)
+        except ValueError:
+            issues.append(issue("error", path, f"controller@selected 必须是整数页索引: {selected}"))
+        else:
+            if selected_index < 0 or selected_index >= len(pairs):
+                issues.append(
+                    issue(
+                        "error",
+                        path,
+                        f"controller@selected 页索引越界: controller={name}, selected={selected_index}, pageCount={len(pairs)}",
+                    )
+                )
+
+    if root.attrib.get("extention") == "Button" and name == "button":
+        if page_names != BUTTON_CONTROLLER_PAGE_NAMES:
+            issues.append(
+                issue(
+                    "error",
+                    path,
+                    "Button 根组件的 button Controller 页面必须依次为 up,down,over,disabled: "
+                    + ",".join(page_names),
+                )
+            )
+
+
+def validate_gear_element(
+    path: Path,
+    root: ET.Element,
+    gear: ET.Element,
+    issues: list[dict[str, str]],
+) -> None:
+    controller_name = gear.attrib.get("controller", "")
+    if not controller_name:
+        issues.append(issue("error", path, f"<{gear.tag}> 缺少 controller"))
+        return
+
+    controller = next(
+        (
+            item for item in root.findall("controller")
+            if item.attrib.get("name") == controller_name
+        ),
+        None,
+    )
+    if controller is None:
+        issues.append(issue("error", path, f"<{gear.tag}> 引用不存在的 Controller: {controller_name}"))
+        return
+
+    pairs, parse_error = parse_controller_page_pairs(controller)
+    if parse_error:
+        return
+    valid_page_ids = {page_id for page_id, _ in pairs}
+    gear_pages = [token.strip() for token in gear.attrib.get("pages", "").split(",") if token.strip()]
+    if not gear_pages:
+        issues.append(issue("error", path, f"<{gear.tag}> 缺少 pages"))
+        return
+    invalid_pages = [page_id for page_id in gear_pages if page_id not in valid_page_ids]
+    if invalid_pages:
+        issues.append(
+            issue(
+                "error",
+                path,
+                f"<{gear.tag}> 引用了 Controller 中不存在的 pageId: {','.join(invalid_pages)}",
+            )
+        )
+
+    values = gear.attrib.get("values")
+    if values is not None:
+        value_groups = values.split("|")
+        if len(value_groups) != len(gear_pages):
+            issues.append(
+                issue(
+                    "error",
+                    path,
+                    f"<{gear.tag}> values 组数必须与 pages 数量一致: pages={len(gear_pages)}, values={len(value_groups)}",
+                )
+            )
+        if gear.tag == "gearLook":
+            for value_group in value_groups:
+                if len([part.strip() for part in value_group.split(",")]) != 5:
+                    issues.append(
+                        issue(
+                            "error",
+                            path,
+                            f"gearLook 每个 values 状态必须包含 5 个字段: {value_group}",
+                        )
+                    )
+            default = gear.attrib.get("default")
+            if default is not None and len([part.strip() for part in default.split(",")]) != 5:
+                issues.append(issue("error", path, f"gearLook@default 必须包含 5 个字段: {default}"))
 
 
 def issue(level: str, file: Path, message: str) -> dict[str, str]:
@@ -368,15 +524,21 @@ def validate_component_controller_parameter(
         issues.append(issue("error", source_file, f"component@controller 引用的 Controller 未设置 exported=\"true\": {controller_name}"))
         return
 
-    page_tokens = [token.strip() for token in controller.attrib.get("pages", "").split(",") if token.strip()]
-    if len(page_tokens) % 2 == 0 and page_tokens and all(page_tokens[index].isdigit() for index in range(0, len(page_tokens), 2)):
-        page_names = page_tokens[1::2]
-    else:
-        page_names = page_tokens
-    if not page_names:
-        issues.append(issue("error", source_file, f"导出的 Controller 没有页面: {controller_name}"))
-    elif page_index >= len(page_names):
-        issues.append(issue("error", source_file, f"component@controller 页索引越界: {encoded}, pageCount={len(page_names)}"))
+    page_pairs, page_error = parse_controller_page_pairs(controller)
+    if page_error:
+        issues.append(issue("error", source_file, f"component@controller 目标 Controller 编码非法: {page_error}"))
+        return
+    if mode == "fresh" and not all(page_id.isdigit() for page_id, _ in page_pairs):
+        issues.append(
+            issue(
+                "error",
+                source_file,
+                f"component@controller 目标 Controller 必须使用数字 pageId,pageName 成对编码: {controller.attrib.get('pages', '')}",
+            )
+        )
+        return
+    if page_index >= len(page_pairs):
+        issues.append(issue("error", source_file, f"component@controller 页索引越界: {encoded}, pageCount={len(page_pairs)}"))
 
 
 def validate_component_extension_overrides(
@@ -679,6 +841,30 @@ def validate_component_element(
             issues.append(issue("warning", path, f"remark 通常应为数字，当前值: {remark}"))
         return
 
+    if elem.tag == "controller":
+        validate_controller_element(path, root, elem, mode, issues)
+
+    if elem.tag.startswith("gear"):
+        validate_gear_element(path, root, elem, issues)
+
+    if elem.tag == "Button":
+        button_mode = elem.attrib.get("mode")
+        if button_mode is not None and button_mode not in BUTTON_MODES:
+            add_mode_issue(
+                issues,
+                mode,
+                path,
+                f"Button@mode 必须使用小写合法值 common/check/radio: {button_mode}",
+            )
+        down_effect = elem.attrib.get("downEffect")
+        if down_effect is not None and down_effect not in BUTTON_DOWN_EFFECTS:
+            add_mode_issue(
+                issues,
+                mode,
+                path,
+                f"Button@downEffect 必须使用合法值 none/color/darken/scale: {down_effect}",
+            )
+
     if elem.tag in DISPLAY_OBJECT_TAGS:
         elem_id = elem.attrib.get("id")
         if not elem_id:
@@ -953,6 +1139,10 @@ def main() -> int:
     component_reuse_checked = False
     display_list_z_order_checked = False
     bitmap_asset_provenance_checked = False
+    asset_isolation_checked = False
+    asset_isolation_applicable: bool | None = None
+    production_preview_lineage_checked = False
+    typography_fidelity_checked = False
     visual_part_coverage_checked = False
     project_root = manifest_info.get("project_root")
     production = manifest.get("production", {}) if isinstance(manifest, dict) else {}
@@ -1012,6 +1202,34 @@ def main() -> int:
             item_path = Path(item["path"]) if item.get("path") else xml_dir
             all_issues.append(issue("warning", item_path, f"bitmap asset provenance [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
 
+        isolation_report = validate_asset_isolation(project_root, "xml_generation", xml_dir)
+        asset_isolation_checked = isolation_report.get("asset_isolation_checked") is True
+        asset_isolation_applicable = isolation_report.get("applicable") is not False
+        for item in isolation_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"asset isolation [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in isolation_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"asset isolation [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
+        preview_lineage_report = validate_production_preview_lineage(project_root, "xml_generation")
+        production_preview_lineage_checked = preview_lineage_report.get("production_preview_lineage_checked") is True
+        for item in preview_lineage_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"production preview lineage [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in preview_lineage_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"production preview lineage [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
+        typography_report = validate_typography_fidelity(project_root, "xml_generation", xml_dir)
+        typography_fidelity_checked = typography_report.get("typography_fidelity_checked") is True
+        for item in typography_report.get("errors", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("error", item_path, f"typography fidelity [{item.get('code', 'invalid')}]: {item.get('message', 'invalid')}"))
+        for item in typography_report.get("warnings", []):
+            item_path = Path(item["path"]) if item.get("path") else xml_dir
+            all_issues.append(issue("warning", item_path, f"typography fidelity [{item.get('code', 'warning')}]: {item.get('message', 'warning')}"))
+
         if (project_root / "specs" / "fgui_spec.md").is_file():
             display_list_z_order_checked = True
             z_order_report = validate_display_list_z_order(project_root, "xml_generation", xml_dir)
@@ -1061,6 +1279,10 @@ def main() -> int:
         "component_reuse_checked": component_reuse_checked,
         "display_list_z_order_checked": display_list_z_order_checked,
         "bitmap_asset_provenance_checked": bitmap_asset_provenance_checked,
+        "asset_isolation_checked": asset_isolation_checked,
+        "asset_isolation_applicable": asset_isolation_applicable,
+        "production_preview_lineage_checked": production_preview_lineage_checked,
+        "typography_fidelity_checked": typography_fidelity_checked,
         "visual_part_coverage_checked": visual_part_coverage_checked,
         "error_count": sum(1 for item in all_issues if item["level"] == "error"),
         "warning_count": sum(1 for item in all_issues if item["level"] == "warning"),

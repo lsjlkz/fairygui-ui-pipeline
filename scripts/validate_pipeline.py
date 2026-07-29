@@ -11,9 +11,12 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_asset_isolation import validate as validate_asset_isolation
 from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
 from validate_component_reuse import validate as validate_component_reuse
 from validate_display_list_z_order import validate as validate_display_list_z_order
+from validate_production_preview_lineage import validate as validate_production_preview_lineage
+from validate_typography_fidelity import validate as validate_typography_fidelity
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 
 
@@ -87,6 +90,9 @@ def validate_manifest(manifest: dict[str, Any], report: dict[str, Any]) -> None:
         if generate_full_screen_design:
             expect(requires_design_approval, report, "full-screen design generation must require explicit design approval", "production.requiresDesignApproval")
             expect(production.get("requiresVisualPartCoverage") is True, report, "full-screen design generation must require visual-part coverage", "production.requiresVisualPartCoverage")
+            expect(production.get("requiresAssetIsolation") is True, report, "full-screen design generation must require asset isolation", "production.requiresAssetIsolation")
+            expect(production.get("requiresProductionPreviewLineage") is True, report, "full-screen design generation must require production-preview asset lineage", "production.requiresProductionPreviewLineage")
+            expect(production.get("requiresTypographyFidelity") is True, report, "full-screen design generation must require typography fidelity", "production.requiresTypographyFidelity")
         if generate_visual_assets:
             expect(requires_visual_reference, report, "visual asset generation must require a visual reference", "production.requiresVisualReference")
 
@@ -320,12 +326,14 @@ def validate_registry(registry: dict[str, Any], report: dict[str, Any]) -> None:
         if instances is not None:
             expect(isinstance(instances, dict), report, "instances must be an object", f"{base}.instances")
             if isinstance(instances, dict):
-                seen_instances: set[str] = set()
+                seen_instances_by_component: dict[str, set[str]] = {}
                 for instance_path, instance_id in instances.items():
                     expect(isinstance(instance_id, str) and bool(instance_id), report, "instance id must be a non-empty string", f"{base}.instances.{instance_path}")
                     if isinstance(instance_id, str):
-                        expect(instance_id not in seen_instances, report, "duplicate instance id within package", f"{base}.instances.{instance_path}")
-                        seen_instances.add(instance_id)
+                        component_scope = str(instance_path).replace("\\", "/").split("/", 1)[0]
+                        scoped_ids = seen_instances_by_component.setdefault(component_scope, set())
+                        expect(instance_id not in scoped_ids, report, "duplicate instance id within component scope", f"{base}.instances.{instance_path}")
+                        scoped_ids.add(instance_id)
 
 
 def normalize_relative_path(value: str) -> Path:
@@ -446,6 +454,13 @@ def main() -> int:
         "errors": [],
         "warnings": [],
         "summary": {"assets": 0, "sheets": 0, "packages": 0},
+        "asset_isolation_checked": False,
+        "asset_isolation_applicable": None,
+        "asset_isolation_status": None,
+        "production_preview_lineage_checked": False,
+        "production_preview_lineage_status": None,
+        "typography_fidelity_checked": False,
+        "typography_fidelity_status": None,
     }
 
     manifest: dict[str, Any] = {}
@@ -579,6 +594,61 @@ def main() -> int:
                 report,
                 "warnings",
                 "bitmap asset provenance: " + item.get("message", "warning"),
+                item.get("path", str(project_root)),
+            )
+
+        isolation_report = validate_asset_isolation(project_root, "asset_planning")
+        report["asset_isolation_checked"] = isolation_report.get("asset_isolation_checked") is True
+        report["asset_isolation_applicable"] = isolation_report.get("applicable") is not False
+        report["asset_isolation_status"] = isolation_report.get("status")
+        for item in isolation_report.get("errors", []):
+            add(
+                report,
+                "errors",
+                "asset isolation: " + item.get("message", "invalid"),
+                item.get("path", str(project_root)),
+            )
+        for item in isolation_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "asset isolation: " + item.get("message", "warning"),
+                item.get("path", str(project_root)),
+            )
+
+        preview_lineage_report = validate_production_preview_lineage(project_root, "asset_planning")
+        report["production_preview_lineage_checked"] = preview_lineage_report.get("production_preview_lineage_checked") is True
+        report["production_preview_lineage_status"] = preview_lineage_report.get("status")
+        for item in preview_lineage_report.get("errors", []):
+            add(
+                report,
+                "errors",
+                "production preview lineage: " + item.get("message", "invalid"),
+                item.get("path", str(project_root)),
+            )
+        for item in preview_lineage_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "production preview lineage: " + item.get("message", "warning"),
+                item.get("path", str(project_root)),
+            )
+
+        typography_report = validate_typography_fidelity(project_root, "asset_planning")
+        report["typography_fidelity_checked"] = typography_report.get("typography_fidelity_checked") is True
+        report["typography_fidelity_status"] = typography_report.get("status")
+        for item in typography_report.get("errors", []):
+            add(
+                report,
+                "errors",
+                "typography fidelity: " + item.get("message", "invalid"),
+                item.get("path", str(project_root)),
+            )
+        for item in typography_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "typography fidelity: " + item.get("message", "warning"),
                 item.get("path", str(project_root)),
             )
 

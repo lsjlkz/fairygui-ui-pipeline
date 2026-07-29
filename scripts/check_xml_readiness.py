@@ -19,10 +19,13 @@ from typing import Any
 
 from check_design_approval import validate as validate_design_approval_gate
 from image_metadata import ImageMetadataError, read_image_metadata
+from validate_asset_isolation import validate as validate_asset_isolation
 from validate_bitmap_asset_provenance import validate as validate_bitmap_asset_provenance
 from validate_component_reuse import validate as validate_component_reuse
 from validate_display_list_z_order import validate as validate_display_list_z_order
+from validate_production_preview_lineage import validate as validate_production_preview_lineage
 from validate_semantic_controller_mapping import validate as validate_semantic_controller_mapping
+from validate_typography_fidelity import validate as validate_typography_fidelity
 from validate_visual_part_coverage import validate as validate_visual_part_coverage
 from verify_embedded_docs import verify as verify_embedded_docs
 
@@ -119,6 +122,12 @@ def validate_manifest(report: dict[str, Any], path: Path, force_visual_reference
             add(report, "blockers", "visual_reference_not_required", "视觉资源生产必须设置 production.requiresVisualReference=true", path)
         if production.get("generateFullScreenDesign") is True and production.get("requiresVisualPartCoverage") is not True:
             add(report, "blockers", "visual_part_coverage_not_required", "完整界面设计必须设置 production.requiresVisualPartCoverage=true", path)
+        if production.get("generateFullScreenDesign") is True and production.get("requiresAssetIsolation") is not True:
+            add(report, "blockers", "asset_isolation_not_required", "完整界面设计必须设置 production.requiresAssetIsolation=true", path)
+        if production.get("generateFullScreenDesign") is True and production.get("requiresProductionPreviewLineage") is not True:
+            add(report, "blockers", "production_preview_lineage_not_required", "完整界面设计必须设置 production.requiresProductionPreviewLineage=true", path)
+        if production.get("generateFullScreenDesign") is True and production.get("requiresTypographyFidelity") is not True:
+            add(report, "blockers", "typography_fidelity_not_required", "完整界面设计必须设置 production.requiresTypographyFidelity=true", path)
 
     references = manifest.get("referenceImages", [])
     primary_count = 0
@@ -786,6 +795,10 @@ def main() -> int:
         "componentReuse": None,
         "displayListZOrder": None,
         "bitmapAssetProvenance": None,
+        "assetIsolation": None,
+        "assetIsolationApplicable": None,
+        "productionPreviewLineage": None,
+        "typographyFidelity": None,
         "visualPartCoverage": None,
         "designApproved": None,
         "packageName": None,
@@ -811,11 +824,17 @@ def main() -> int:
         "componentReuseParameterizationContract": skill_root / "references" / "component-reuse-parameterization-contract.md",
         "displayListZOrderContract": skill_root / "references" / "display-list-z-order-contract.md",
         "bitmapIconSourceContract": skill_root / "references" / "bitmap-icon-source-contract.md",
+        "assetIsolationContract": skill_root / "references" / "asset-isolation-contract.md",
+        "productionPreviewLineageContract": skill_root / "references" / "production-preview-lineage-contract.md",
+        "typographyFidelityContract": skill_root / "references" / "typography-fidelity-contract.md",
         "visualPartCoverageContract": skill_root / "references" / "visual-part-coverage-contract.md",
         "semanticControllerMappingValidator": skill_root / "scripts" / "validate_semantic_controller_mapping.py",
         "componentReuseValidator": skill_root / "scripts" / "validate_component_reuse.py",
         "displayListZOrderValidator": skill_root / "scripts" / "validate_display_list_z_order.py",
         "bitmapAssetProvenanceValidator": skill_root / "scripts" / "validate_bitmap_asset_provenance.py",
+        "assetIsolationValidator": skill_root / "scripts" / "validate_asset_isolation.py",
+        "productionPreviewLineageValidator": skill_root / "scripts" / "validate_production_preview_lineage.py",
+        "typographyFidelityValidator": skill_root / "scripts" / "validate_typography_fidelity.py",
         "visualPartCoverageValidator": skill_root / "scripts" / "validate_visual_part_coverage.py",
         "packageResourcePathContract": skill_root / "references" / "package-resource-path-contract.md",
     }
@@ -1053,6 +1072,65 @@ def main() -> int:
                 item.get("message", "图标位图来源警告"),
                 Path(item["path"]) if item.get("path") else root,
             )
+
+        isolation_report = validate_asset_isolation(root, "xml_generation")
+        isolation_applicable = isolation_report.get("applicable") is not False
+        report["assetIsolationApplicable"] = isolation_applicable
+        report["assetIsolation"] = isolation_report.get("ok") if isolation_applicable else None
+        for item in isolation_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "asset_isolation_" + item.get("code", "invalid"),
+                item.get("message", "资源隔离校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in isolation_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "asset_isolation_" + item.get("code", "warning"),
+                item.get("message", "资源隔离警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
+        preview_lineage_report = validate_production_preview_lineage(root, "xml_generation")
+        report["productionPreviewLineage"] = preview_lineage_report.get("ok") if preview_lineage_report.get("applicable") is not False else None
+        for item in preview_lineage_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "production_preview_lineage_" + item.get("code", "invalid"),
+                item.get("message", "生产预览与运行时资源同源校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in preview_lineage_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "production_preview_lineage_" + item.get("code", "warning"),
+                item.get("message", "生产预览资源同源警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+
+        typography_report = validate_typography_fidelity(root, "xml_generation")
+        report["typographyFidelity"] = typography_report.get("ok") if typography_report.get("applicable") is not False else None
+        for item in typography_report.get("errors", []):
+            add(
+                report,
+                "blockers",
+                "typography_fidelity_" + item.get("code", "invalid"),
+                item.get("message", "字体样式同源校验失败"),
+                Path(item["path"]) if item.get("path") else root,
+            )
+        for item in typography_report.get("warnings", []):
+            add(
+                report,
+                "warnings",
+                "typography_fidelity_" + item.get("code", "warning"),
+                item.get("message", "字体样式同源警告"),
+                Path(item["path"]) if item.get("path") else root,
+            )
         validate_asset_files(report, root, manifest, args.skip_asset_existence, args.profile)
 
     report["ready"] = not report["blockers"]
@@ -1075,6 +1153,21 @@ def main() -> int:
             "fguiSpec": fgui_spec_path,
             **local_contracts,
         }
+        asset_isolation_review_path = root / "reports" / "asset_isolation_review.md"
+        if asset_isolation_review_path.is_file():
+            source_paths["assetIsolationReview"] = asset_isolation_review_path
+        production_preview_lineage_path = specs_dir / "production_preview_lineage.json"
+        if production_preview_lineage_path.is_file():
+            source_paths["productionPreviewLineage"] = production_preview_lineage_path
+        production_preview_approval_path = root / "reports" / "production_preview_approval.json"
+        if production_preview_approval_path.is_file():
+            source_paths["productionPreviewApproval"] = production_preview_approval_path
+        typography_spec_path = specs_dir / "typography_spec.json"
+        if typography_spec_path.is_file():
+            source_paths["typographySpec"] = typography_spec_path
+        typography_render_trace_path = root / "reports" / "typography_render_trace.json"
+        if typography_render_trace_path.is_file():
+            source_paths["typographyRenderTrace"] = typography_render_trace_path
         if design_driven:
             source_paths.update(
                 {

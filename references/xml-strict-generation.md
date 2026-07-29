@@ -34,10 +34,13 @@ Before producing XML-related output, read:
 10. `references/component-instance-configuration-contract.md` whenever a reusable component has multiple semantic instances or per-instance data.
 11. `references/display-list-z-order-contract.md` for every component hierarchy and XML displayList.
 12. `references/bitmap-icon-source-contract.md` for icon-like visual assets.
-13. `references/visual-part-coverage-contract.md` for every approved complete-screen design.
-14. `references/asset-size-contract.md` for every bitmap resource.
-15. `references/package-resource-path-contract.md` before package staging or XML generation.
-16. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `component_visual_parts.json`, `layout_spec.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
+13. `references/asset-isolation-contract.md` for every runtime bitmap produced from or compared with an approved full-screen mockup.
+14. `references/production-preview-lineage-contract.md` for exact staged-asset preview composition and the second human approval.
+15. `references/typography-fidelity-contract.md` for deterministic preview/XML text rendering.
+16. `references/visual-part-coverage-contract.md` for every approved complete-screen design.
+17. `references/asset-size-contract.md` for every bitmap resource.
+18. `references/package-resource-path-contract.md` before package staging or XML generation.
+19. The current `ui_spec.md`, `visual_design_brief.md`, `design_approval.json`, `uxui_semantic_spec.md`, `component_state_map.json`, `component_visual_parts.json`, `layout_spec.json`, `production_preview_lineage.json`, `typography_spec.json`, `fgui_spec.md`, `asset_manifest.json`, and `fgui_id_registry.json` as applicable.
 
 If either embedded complete source document cannot be read in the current task, or `scripts/verify_embedded_docs.py` reports a failure, do not generate XML.
 
@@ -49,6 +52,9 @@ python scripts/validate_semantic_controller_mapping.py --root UIProduction --sta
 python scripts/validate_component_reuse.py --root UIProduction --stage xml_generation --out UIProduction/reports/component_reuse_report.json --report-md UIProduction/reports/component_reuse_report.md
 python scripts/validate_display_list_z_order.py --root UIProduction --stage xml_generation --out UIProduction/reports/display_list_z_order_report.json --report-md UIProduction/reports/display_list_z_order_report.md
 python scripts/validate_bitmap_asset_provenance.py --root UIProduction --stage xml_generation --out UIProduction/reports/bitmap_asset_provenance_report.json --report-md UIProduction/reports/bitmap_asset_provenance_report.md
+python scripts/validate_asset_isolation.py --root UIProduction --stage xml_generation --xml-dir UIProduction/fgui_xml/<package_name> --out UIProduction/reports/asset_isolation_report.json --report-md UIProduction/reports/asset_isolation_report.md
+python scripts/validate_production_preview_lineage.py --root UIProduction --stage xml_generation --out UIProduction/reports/production_preview_lineage_report.json --report-md UIProduction/reports/production_preview_lineage_report.md
+python scripts/validate_typography_fidelity.py --root UIProduction --stage xml_generation --xml-dir UIProduction/fgui_xml/<package_name> --out UIProduction/reports/typography_fidelity_report.json --report-md UIProduction/reports/typography_fidelity_report.md
 python scripts/validate_visual_part_coverage.py --root UIProduction --stage xml_generation --out UIProduction/reports/visual_part_coverage_report.json --report-md UIProduction/reports/visual_part_coverage_report.md
 python scripts/check_xml_readiness.py --root UIProduction --profile fresh --require-design-approval --resource-generation --design-driven --out UIProduction/reports/xml_readiness_report.json --report-md UIProduction/reports/xml_blocking_report.md --snapshot-out UIProduction/reports/xml_generation_input_snapshot.json
 ```
@@ -79,6 +85,9 @@ Generate XML only when all of these are known:
 - every visual instance's `xmlInstanceName`, implementation mode, base component file, Controller pages, `controllerParameters` when externally passed, readable preview values, runtime bindings, and justified variant data when applicable
 - every Display List row's `Z Layer` and `Occlusion Policy`, with opaque backgrounds first
 - every icon asset's approved bitmap `assetSource`
+- `production.requiresAssetIsolation=true` for complete-screen projects, every bitmap's `assetIsolation` declaration, and passing automated plus human isolation review
+- `production.requiresProductionPreviewLineage=true`, exact runtime-file preview usage, one `sourceLineage` entry per runtime bitmap, valid exact-copy/crop or reconstruction evidence, passing human production-preview approval, and unchanged source/transform/preview/runtime SHA-256 values
+- `production.requiresTypographyFidelity=true`, one approved typography spec, deterministic preview rendering with a current hash-bound render trace, and exact XML text attributes/bounds
 - every approved-design visual part's importance, complexity, implementation mode, manifest asset or XML node, file scope, and fallback policy
 - business state owner, visual state owner, and dynamic-data owner
 - relation targets
@@ -101,6 +110,9 @@ The automated readiness gate additionally verifies:
 - reusable components, parameterizable fields, exported Controller parameters, composite children, Component Reuse Plan rows, and XML structural signatures pass `validate_component_reuse.py`
 - Display List back-to-front ordering passes `validate_display_list_z_order.py`
 - icon provenance and production-script audit pass `validate_bitmap_asset_provenance.py`
+- resource isolation passes `validate_asset_isolation.py`: no complete mockup used as runtime background, no plain-crop isolation claims, no opaque screenshot portraits/icons, and no baked dynamic content in skins
+- production preview lineage passes `validate_production_preview_lineage.py`: every runtime bitmap is mapped to exact preview usage, declares exact approved/provided source or justified reference reconstruction, and all source/transform/human-approved hashes remain unchanged
+- typography fidelity passes `validate_typography_fidelity.py`: preview renderer loads the typography spec, emits a matching per-instance render trace, and XML matches all declared text attributes, bounds, preview text, and localization mapping
 - reusable instances with different semantics do not all fall back to one default component
 - content-only differences do not produce separate XML files
 - justified structural variants have non-identical XML signatures and matching default Controller pages
@@ -177,7 +189,7 @@ Before allocating IDs or writing XML, create `reports/xml_generation_input_snaps
 - selected profile: `fresh` or `editor-compatible`
 - package name and package ID
 - design resolution
-- paths to manifest, registry, `fgui_spec.md`, `visual_design_brief.md`, `design_approval.json`, the exact approved design image, design-driven semantic/layout sources, reference images, and generated asset files
+- paths to manifest, registry, `fgui_spec.md`, `visual_design_brief.md`, `design_approval.json`, the exact approved design image, production-preview lineage/approval, typography spec/render trace, design-driven semantic/layout sources, reference images, and generated asset files
 - hashes when available, otherwise modification times
 - unresolved risks and accepted exceptions
 - status `frozen_for_generation`
@@ -197,10 +209,13 @@ Generate in this order:
 7. generate reusable parameterized child components and export any Controller intended for parent-instance configuration
 8. generate base composite components after their children exist
 9. generate only structurally justified variants accepted by `validate_component_reuse.py`
-10. materialize every required visual part from `component_visual_parts.json`, using approved bitmaps for icons
-11. generate the main screen last, with direct children ordered back-to-front, and materialize every visual instance
-12. validate exact component `fileName` paths, reuse plans, normalized structural signatures, exported Controller page indices, extension parameters, z-order, preview values, runtime-binding declarations, required visual nodes, and asset references
-13. generate validation reports and the FairyGUI import checklist
+10. validate every staged bitmap with `validate_asset_isolation.py`; reject full-screen mockup backgrounds, contaminated crops, missing alpha, and baked dynamic content
+11. validate every runtime bitmap's `sourceLineage`: exact provided/approved source when possible, deterministic transform evidence when necessary, or justified reference reconstruction
+12. assemble the exact production preview from staged assets and `typography_spec.json`, emit `typography_render_trace.json`, obtain human approval, and freeze source/transform/preview/runtime hashes
+13. materialize every required visual part from `component_visual_parts.json`, using approved and isolated bitmaps for icons
+14. generate the main screen last, with direct children ordered back-to-front, and materialize every visual instance
+15. validate exact component paths, reuse plans, Controller parameters, z-order, source/preview asset lineage, typography spec/trace/XML attributes and bounds, required visual nodes, and runtime bindings
+16. generate validation reports and the FairyGUI import checklist
 
 A parent component may not reference a child whose resource ID is absent from both `package.xml` and the registry. A failed component blocks its dependants, but does not require unrelated IDs or components to be regenerated. Never emit a partially wired main panel.
 
@@ -249,6 +264,9 @@ When reviewing or repairing XML from `GameUI/assets` that has already been accep
 - Use `pkg` only for cross-package references.
 - Use `url`, `icon`, `sound`, `dropdown`, and `defaultItem` only with resolvable `ui://` URLs.
 - Resolve every controller, page, relation target, gear target, transition target, and list item before emission.
+- Serialize every Controller `pages` attribute as exact `pageId,pageName` pairs, for example `0,up,1,down,2,over,3,disabled`; never emit a names-only sequence such as `up,down,over,disabled`. Fresh generated Controllers must explicitly declare a valid `selected` page index.
+- Gear `pages` values must reference the Controller page IDs, not page names. Every `values` group count must equal the Gear page count. Each `gearLook` state and `default` must use the five-field FairyGUI serialization; four-field look tuples are forbidden.
+- A Button extension must have the internal `button` Controller with pages `up/down/over/disabled` in that order, plus valid `title` and `icon` children when those extension properties are used. Button enum values must use the XML spelling accepted by the embedded specification or a verified editor export.
 - For every component-instance extension parameter child node, resolve the target component XML, require the child tag to equal the target root `extention`, validate allowed attributes, and resolve all `ui://` values.
 - Materialize every `component_state_map.visualInstances` record. A reusable component with different role/state/title/icon/preview data cannot silently use `static_default` for all instances.
 - Require `reusePlan` for every reusable semantic component. Prefer one base component plus external Button/Label parameters, Controller pages, runtime bindings, or reusable child components.
@@ -259,6 +277,9 @@ When reviewing or repairing XML from `GameUI/assets` that has already been accep
 - Materialize every required visible part in `component_visual_parts.json`; omission of a small icon, frame, title decoration, separator, background, marker, or required text is a hard error.
 - Emit displayList children back-to-front and block any opaque full-size background that appears after content.
 - Require icon assets to come from approved design/sheet slices, provided bitmaps, existing package bitmaps, or reference-driven image generation. Programmatic vector-like icon drawing is forbidden.
+- Require complete-screen projects to set `requiresAssetIsolation=true`; every bitmap must declare an isolation role and review evidence. Do not use the approved full-screen design as a runtime background or universal crop source. A plain crop cannot claim UI removal, alpha extraction, neighbor cleanup, baked-text removal, or hidden-pixel reconstruction.
+- Require `requiresProductionPreviewLineage=true`; every runtime bitmap must declare exact approved/provided source or justified reference reconstruction plus deterministic derivation evidence. The final preview must use exact staged runtime files and a human approval bound to preview plus asset hashes. Regeneration after approval is forbidden until the approval is superseded.
+- Require `requiresTypographyFidelity=true`; image-model lettering is reference-only, preview/XML text must come from one approved typography spec, and deterministic preview rendering must emit a current hash-bound per-instance render trace.
 - Asset-backed parts must resolve to the declared Manifest asset and registered package resource.
 - Detailed visual parts may use Graph only after explicit human approval recorded in the coverage file.
 - For a justified `variant_component`, require the registered target XML's selected Controller pages to match the instance declaration.
@@ -309,12 +330,16 @@ Confirm:
 
 - FairyGUI editor opens the package without repair prompts
 - hierarchy and z-order agree with `fgui_spec.md`
-- controllers switch every declared page
-- gears, relations, and transitions resolve valid objects and values
+- controllers switch every declared page, with `pages` stored as `pageId,pageName` pairs and an in-range `selected` index
+- gears, relations, and transitions resolve valid objects and values; `gearLook` states contain five serialized fields and Gear pages reference Controller page IDs
 - external Button/Label title and icon overrides affect the intended instance, and their extension type matches the referenced component
 - exported Controller parameters affect the intended instance and the parent `controller` page index matches the target Controller pages sequence
 - opaque backgrounds are behind all content and transparent frames do not cover the center
 - every icon visually matches its approved bitmap source and has no generic procedural-vector appearance
+- backgrounds contain environment only; isolated portraits/icons have clean alpha and no screenshot rectangle; frames/panels/buttons contain no baked dynamic text or duplicated child content
+- the approved production preview and package use the exact same runtime bitmap files and hashes
+- exact-copy/crop claims match the source pixels; reconstructed assets are clearly marked and justified
+- every text node matches the approved typography spec and render trace for font, size, color, spacing, stroke/shadow, bounds, preview text, and localization key
 - every reusable instance displays the intended portrait, icon, title, state, selected page, and preview values
 - component files with data-only differences were consolidated into one base component
 - repeated icon-plus-value, icon-plus-title, badge, row, or panel-shell structures use reusable child components when appropriate
